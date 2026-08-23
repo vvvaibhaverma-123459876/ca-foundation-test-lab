@@ -875,12 +875,18 @@ async function loadArtifact(subject) {
       return { number: paperIndex + 1, questions };
     }
 
-    const questions = [...paperElement.querySelectorAll('.bigq')].map((questionElement, index) => ({
-      number: Number(questionElement.querySelector('.bigq-no')?.textContent.replace(/\D/g, '')) || index + 1,
-      marks: questionElement.querySelector('.bigq-tot')?.textContent.trim() || '20 Marks',
-      compulsory: Boolean(questionElement.querySelector('.compulsory')),
-      html: sanitizeHTML(questionElement.innerHTML)
-    }));
+    const questions = [...paperElement.querySelectorAll('.bigq')].map((questionElement, index) => {
+      const reasoning = questionElement.querySelector('.reasoning')?.textContent.trim() || '';
+      const questionCopy = questionElement.cloneNode(true);
+      questionCopy.querySelectorAll('.reasoning').forEach(element => element.remove());
+      return {
+        number: Number(questionElement.querySelector('.bigq-no')?.textContent.replace(/\D/g, '')) || index + 1,
+        marks: questionElement.querySelector('.bigq-tot')?.textContent.trim() || '20 Marks',
+        compulsory: Boolean(questionElement.querySelector('.compulsory')),
+        reasoning,
+        html: sanitizeHTML(questionCopy.innerHTML)
+      };
+    });
     return { number: paperIndex + 1, questions };
   });
   const data = { ...config, papers };
