@@ -38,12 +38,15 @@ are weakest in, so a short run is still aimed revision rather than a shuffle.
 
 **Wrong answers can explain themselves.** Papers 3 and 4 ship with an answer key
 and no reasons. Add a [Claude API key](https://console.anthropic.com/settings/keys)
-once under Help and any MCQ will tell you, in three short lines, why the right
+once under Help — either paste it, or point the lab at an env file such as
+`ai.env` and it reads the Anthropic key out of it, ignoring every other secret
+in that file — and any MCQ will tell you, in three short lines, why the right
 answer is right, what the specific confusion behind your answer was, and the one
 rule worth memorising. Each explanation is saved on your device, so you never pay
 for the same question twice and can re-read it offline. The key stays in your
 browser, is sent to nothing but Anthropic's API, and is deliberately kept out of
-the backup file. Everything else in the lab works without it.
+the backup file — which does mean each device needs the key set once. Everything
+else in the lab works without it.
 
 **Answering with a keyboard is faster.** Press <kbd>A</kbd>–<kbd>D</kbd> to
 choose an answer, <kbd>&rarr;</kbd> and <kbd>&larr;</kbd> to move through the

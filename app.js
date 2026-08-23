@@ -1137,7 +1137,11 @@ function renderHelp() {
               ${explanationCount ? `<button class="button secondary" data-action="clear-explanations">Clear saved explanations</button>` : ''}
             </div>`
           : `<label class="field">Claude API key<input type="password" data-api-key-input placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></label>
-            <div class="inline-actions"><button class="button coral" data-action="save-api-key">Turn on explanations</button></div>`}
+            <div class="inline-actions">
+              <button class="button coral" data-action="save-api-key">Turn on explanations</button>
+              <label class="button secondary restore-button">Load from a .env file<input type="file" accept=".env,.txt,text/plain" data-env-file aria-label="Choose an env file to read the Anthropic key from"></label>
+            </div>
+            <p class="backup-note">Already keep your keys in a file such as <code>ai.env</code>? Pick it and the lab reads the Anthropic key straight out of it. Only that one line is used — anything else in the file is ignored and never stored.</p>`}
           <p class="backup-note">The key is stored in this browser only and is sent to nothing except Anthropic's API. It is not in the backup file, and anyone who can open this browser profile can read it &mdash; so use a key with a spend limit set.</p>
         </div>
       </section>
@@ -1202,6 +1206,36 @@ REMEMBER: one rule, definition or formula worth memorising, at most 15 words.
 Be concise and concrete. Use CA Foundation syllabus terminology and Indian context. Never pad, never restate the question, never add encouragement.
 
 If you are not confident that the correct option given to you is actually correct, begin the RIGHT line with "Check this:" and say briefly what you think is wrong. An honest flag is far more useful than a justification you do not believe.`;
+
+// A browser cannot read a path like C:\Users\you\.secrets\ai.env by itself, but
+// it can read a file the user hands it through a picker. An env file usually
+// holds several services' secrets, so only the Anthropic one is ever taken out
+// of it — every other line is dropped with the file when this function returns.
+const ANTHROPIC_KEY_NAMES = ['ANTHROPIC_API_KEY', 'ANTHROPIC_KEY', 'CLAUDE_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+
+function keyFromEnvFile(text) {
+  const found = {};
+  String(text).split(/\r?\n/).forEach(rawLine => {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) return;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match) return;
+    let value = match[2].trim();
+    // Strip a trailing comment only when it is clearly separate from the value.
+    if (!/^["']/.test(value)) value = value.replace(/\s+#.*$/, '').trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (value) found[match[1].toUpperCase()] = value;
+  });
+
+  for (const name of ANTHROPIC_KEY_NAMES) {
+    if (found[name]) return { key: found[name], name };
+  }
+  // Fall back to whatever in the file looks like an Anthropic key.
+  const guess = Object.entries(found).find(([, value]) => value.startsWith('sk-ant-'));
+  return guess ? { key: guess[1], name: guess[0] } : null;
+}
 
 function readApiKey() {
   try { return localStorage.getItem(API_KEY_STORAGE) || ''; } catch { return ''; }
@@ -2931,6 +2965,25 @@ document.addEventListener('click', async event => {
 });
 
 document.addEventListener('change', async event => {
+  const envInput = event.target.closest('[data-env-file]');
+  if (envInput) {
+    const file = envInput.files?.[0];
+    envInput.value = '';
+    if (!file) return;
+    if (file.size > 512 * 1024) return toast('That file is too large to be an env file.');
+    try {
+      const found = keyFromEnvFile(await file.text());
+      if (!found) return toast('No Anthropic key found in that file. Look for a line starting ANTHROPIC_API_KEY=.');
+      writeApiKey(found.key);
+      renderHelp();
+      toast(found.key.startsWith('sk-ant-')
+        ? `Read ${found.name} from ${file.name}. Explanations are on.`
+        : `Read ${found.name} from ${file.name}, but it does not look like an Anthropic key. Check it if explanations fail.`);
+    } catch {
+      toast('That file could not be read.');
+    }
+    return;
+  }
   const restoreInput = event.target.closest('[data-restore-input]');
   if (restoreInput) {
     const file = restoreInput.files?.[0];

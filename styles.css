@@ -707,7 +707,8 @@ kbd {
 .explain-empty { border-left-color: var(--line); background: var(--paper-2); }
 .key-box { background: var(--gold-soft); border-color: rgba(24,52,47,.2); }
 .key-box .field { margin-bottom: 14px; }
-.key-box input { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; background: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.key-box input[type="password"] { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; background: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.key-box code, .backup-note code { border-radius: 5px; padding: 1px 5px; background: rgba(24,52,47,.08); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
 
 /* ---------- frenzy: hub ---------- */
 .frenzy-promo {
