@@ -31,6 +31,20 @@ take a call, come back tomorrow — your remaining time is exactly where you lef
 it. Use *Pause paper* for a deliberate break; it stops the clock and covers the
 questions. Unfinished papers wait for you at the top of the Practice tab.
 
+**Frenzy is for the ten minutes you didn't plan for.** Mixed questions from every
+topic, thirty seconds each, three lives, a streak multiplier and a daily target.
+It weights questions toward the topics your past papers and past runs show you
+are weakest in, so a short run is still aimed revision rather than a shuffle.
+
+**Wrong answers can explain themselves.** Papers 3 and 4 ship with an answer key
+and no reasons. Add a [Claude API key](https://console.anthropic.com/settings/keys)
+once under Help and any MCQ will tell you, in three short lines, why the right
+answer is right, what the specific confusion behind your answer was, and the one
+rule worth memorising. Each explanation is saved on your device, so you never pay
+for the same question twice and can re-read it offline. The key stays in your
+browser, is sent to nothing but Anthropic's API, and is deliberately kept out of
+the backup file. Everything else in the lab works without it.
+
 **Answering with a keyboard is faster.** Press <kbd>A</kbd>–<kbd>D</kbd> to
 choose an answer, <kbd>&rarr;</kbd> and <kbd>&larr;</kbd> to move through the
 paper, <kbd>M</kbd> to mark a question for review, <kbd>G</kbd> for the question
@@ -47,6 +61,7 @@ bar at the bottom of a paper holds the question grid, pause, and submit.
 | Paper 4 · Business Economics | 10 mocks of 100 MCQs · 2 hours · +1 / −0.25 |
 | Source library | Six official ICAI PDFs, kept exactly as supplied |
 | Create test | Build your own paper in the current ICAI Foundation format |
+| Frenzy | Mixed-topic rapid MCQs, weighted toward your weak topics |
 
 The **Create test** workspace covers CA Foundation Papers 1–4 and locks each
 paper to the current ICAI format: Papers 1–2 use six 20-mark descriptive
@@ -85,7 +100,8 @@ the computer's LAN address instead of `localhost`, for example
 ### Layout
 
 - `index.html` — the shell: header, nav, live region, and modal host.
-- `app.js` — router, exam engine, timer, question bank, builder, backup/restore.
+- `app.js` — router, exam engine, timer, question bank, builder, frenzy mode,
+  explanations, backup/restore.
 - `styles.css` — all styling, including the phone and print layouts.
 - `data/` — the mock papers, parsed at runtime.
 - `assets/pdfs/` — the official ICAI source PDFs.

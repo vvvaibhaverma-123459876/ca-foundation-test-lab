@@ -233,6 +233,9 @@ const quantitativeQuestions = quantitativeAnswers.map((letter, index) => ({
   text: `Answer Question ${index + 1} using the official Quantitative Aptitude RTP (source page ${quantitativePages[index]}).`,
   options: ['Option A', 'Option B', 'Option C', 'Option D'],
   answer: letter.charCodeAt(0) - 97,
+  // The wording lives in the source PDF, so this row only makes sense with the
+  // PDF open beside it. Anything that must stand on its own skips these.
+  external: true,
   section: index < 10 ? 'Business Mathematics' : index < 16 ? 'Statistics & probability' : index < 21 ? 'Mixed aptitude' : 'Statistics & reasoning'
 }));
 
@@ -351,7 +354,8 @@ const state = {
   data: null,
   session: null,
   builder: null,
-  customTest: null
+  customTest: null,
+  frenzy: null
 };
 
 function escapeHTML(value = '') {
@@ -966,7 +970,7 @@ function labStorageEntries() {
   const entries = {};
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (key && key.startsWith('foundation-test-lab:')) entries[key] = localStorage.getItem(key);
+    if (key && key.startsWith('foundation-test-lab:') && key !== API_KEY_STORAGE) entries[key] = localStorage.getItem(key);
   }
   return entries;
 }
@@ -1013,7 +1017,7 @@ async function backupSummary() {
   let photos = [];
   try { photos = await allPhotos(); } catch { photos = []; }
   const bytes = photos.reduce((sum, photo) => sum + (photo.blob?.size || 0), 0);
-  const attempts = Object.keys(labStorageEntries()).filter(key => key !== CUSTOM_TESTS_KEY).length;
+  const attempts = Object.keys(labStorageEntries()).filter(key => key !== CUSTOM_TESTS_KEY && key !== EXPLAIN_CACHE_KEY).length;
   return { photoCount: photos.length, photoBytes: bytes, attempts, customTests: readCustomTests().length };
 }
 
@@ -1047,7 +1051,7 @@ async function restoreBackup(file) {
   try { payload = JSON.parse(text); } catch { throw new Error('That file is not a Foundation Test Lab backup.'); }
   if (payload?.app !== 'foundation-test-lab' || !payload.storage) throw new Error('That file is not a Foundation Test Lab backup.');
   Object.entries(payload.storage).forEach(([key, value]) => {
-    if (key.startsWith('foundation-test-lab:')) localStorage.setItem(key, value);
+    if (key.startsWith('foundation-test-lab:') && key !== API_KEY_STORAGE) localStorage.setItem(key, value);
   });
   let restoredPhotos = 0;
   if (Array.isArray(payload.photos) && payload.photos.length) {
@@ -1072,6 +1076,8 @@ function renderHelp() {
   stopTimer();
   document.body.classList.remove('exam-active');
   activateNav('help');
+  const key = readApiKey();
+  const explanationCount = Object.keys(readExplanationCache()).length;
   app.innerHTML = `
     <section class="page-shell help-page">
       <div class="help-head">
@@ -1095,6 +1101,11 @@ function renderHelp() {
           <p>Any unfinished paper appears at the top of <a href="#home">Practice</a> under <b>Pick up where you stopped</b>, with the time still on its clock. You never have to remember which mock you were on.</p>
         </article>
         <article class="help-card">
+          <span class="help-step">★</span>
+          <h2>Ten spare minutes</h2>
+          <p><a href="#frenzy">Frenzy</a> throws mixed questions at you, thirty seconds each, three lives. It leans on whatever topics you keep getting wrong, so a short run is still targeted revision.</p>
+        </article>
+        <article class="help-card">
           <span class="help-step">4</span>
           <h2>Answer faster</h2>
           <p>On a keyboard, press <kbd>A</kbd>&ndash;<kbd>D</kbd> to choose an answer and <kbd>&rarr;</kbd> for the next question. <button class="link-button" data-action="shortcut-help">See the full list</button>. On a phone, the bar at the bottom of a paper holds the question grid, pause, and submit.</p>
@@ -1112,6 +1123,22 @@ function renderHelp() {
             <label class="button secondary restore-button">Restore from a backup<input type="file" accept="application/json,.json" data-restore-input aria-label="Choose a Foundation Test Lab backup file to restore"></label>
           </div>
           <p class="backup-note">Restoring adds the papers from the file back into this browser. Work already here with the same paper number is replaced by the version in the file.</p>
+        </div>
+      </section>
+
+      <section class="help-panel">
+        <h2>Explanations for wrong answers</h2>
+        <p>Papers 3 and 4 ship with an answer key, not reasons. To get a short "why this is right, why yours was wrong" under any MCQ, add a Claude API key once. Every explanation is then saved on this device, so you never pay for the same question twice and can re-read it offline.</p>
+        <p>Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Explanations run on ${escapeHTML(EXPLAIN_MODEL)} and cost a fraction of a rupee each. Without a key everything else in the lab works exactly as before.</p>
+        <div class="backup-box key-box">
+          ${key ? `<p class="backup-summary">Explanations are on. Key ending <b>${escapeHTML(key.slice(-4))}</b>, ${explanationCount} saved on this device.</p>
+            <div class="inline-actions">
+              <button class="button secondary" data-action="clear-api-key">Remove the key</button>
+              ${explanationCount ? `<button class="button secondary" data-action="clear-explanations">Clear saved explanations</button>` : ''}
+            </div>`
+          : `<label class="field">Claude API key<input type="password" data-api-key-input placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></label>
+            <div class="inline-actions"><button class="button coral" data-action="save-api-key">Turn on explanations</button></div>`}
+          <p class="backup-note">The key is stored in this browser only and is sent to nothing except Anthropic's API. It is not in the backup file, and anyone who can open this browser profile can read it &mdash; so use a key with a spend limit set.</p>
         </div>
       </section>
 
@@ -1144,6 +1171,575 @@ async function refreshBackupSummary() {
   } catch {
     node.textContent = 'Your answers and notes are saved in this browser.';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Answer explanations.
+//
+// Two sources, in order of preference:
+//   1. Reasoning already stored on the question (the generated quantitative
+//      items and anything written in the builder). Free, instant, offline.
+//   2. Claude, asked live. The 1,000 economics MCQs ship with an answer key
+//      and nothing else, so this is the only way to get a "why" for them.
+//
+// The key is the student's own, kept in this browser and sent to nowhere but
+// api.anthropic.com. Every answer is cached locally, so a question is only ever
+// paid for once and re-reads work offline.
+// ---------------------------------------------------------------------------
+const EXPLAIN_MODEL = 'claude-opus-5';
+const API_KEY_STORAGE = 'foundation-test-lab:api-key';
+const EXPLAIN_CACHE_KEY = 'foundation-test-lab:explanations';
+const EXPLAIN_ENDPOINT = 'https://api.anthropic.com/v1/messages';
+
+const EXPLAIN_SYSTEM = `You are helping a student revise for the ICAI CA Foundation examination in India. They have just answered a multiple-choice question and want to know why.
+
+Reply in exactly this format, with no preamble, no headings and no extra lines:
+
+RIGHT: one sentence, at most 25 words, saying why the correct option is correct.
+WRONG: one sentence, at most 25 words, naming the specific confusion behind the student's option. Omit this line entirely if they chose correctly.
+REMEMBER: one rule, definition or formula worth memorising, at most 15 words.
+
+Be concise and concrete. Use CA Foundation syllabus terminology and Indian context. Never pad, never restate the question, never add encouragement.
+
+If you are not confident that the correct option given to you is actually correct, begin the RIGHT line with "Check this:" and say briefly what you think is wrong. An honest flag is far more useful than a justification you do not believe.`;
+
+function readApiKey() {
+  try { return localStorage.getItem(API_KEY_STORAGE) || ''; } catch { return ''; }
+}
+
+function writeApiKey(key) {
+  try {
+    if (key) localStorage.setItem(API_KEY_STORAGE, key);
+    else localStorage.removeItem(API_KEY_STORAGE);
+  } catch { /* storage unavailable */ }
+}
+
+// A stable id for a question, so the cache survives papers being re-parsed and
+// question numbers shifting around.
+function explanationId(question) {
+  const basis = `${question.text}|${(question.options || []).join('|')}|${question.answer}`;
+  let hash = 0;
+  for (let index = 0; index < basis.length; index += 1) {
+    hash = (hash * 31 + basis.charCodeAt(index)) | 0;
+  }
+  return `q${(hash >>> 0).toString(36)}`;
+}
+
+function readExplanationCache() {
+  try { return JSON.parse(localStorage.getItem(EXPLAIN_CACHE_KEY)) || {}; }
+  catch { return {}; }
+}
+
+function cachedExplanation(question) {
+  return readExplanationCache()[explanationId(question)] || null;
+}
+
+function cacheExplanation(question, parsed) {
+  try {
+    const cache = readExplanationCache();
+    cache[explanationId(question)] = parsed;
+    localStorage.setItem(EXPLAIN_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* a full quota should not break the lesson */ }
+}
+
+function parseExplanation(text) {
+  const line = label => {
+    const match = new RegExp(`^${label}:\\s*(.+)$`, 'im').exec(text);
+    return match ? match[1].trim() : '';
+  };
+  const parsed = { right: line('RIGHT'), wrong: line('WRONG'), remember: line('REMEMBER') };
+  // If the model ignored the format, keep the prose rather than showing nothing.
+  if (!parsed.right && !parsed.wrong && !parsed.remember) parsed.right = text.trim();
+  return parsed;
+}
+
+class ExplainError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+async function requestExplanation(question, chosenIndex) {
+  const key = readApiKey();
+  if (!key) throw new ExplainError('no-key', 'Add your Claude API key in Help to turn on explanations.');
+  if (!navigator.onLine) throw new ExplainError('offline', 'You are offline. Explanations you have already seen still work.');
+
+  const options = (question.options || [])
+    .map((option, index) => `${String.fromCharCode(65 + index)}. ${option}`)
+    .join('\n');
+  const correctLetter = String.fromCharCode(65 + Number(question.answer));
+  const chose = Number.isInteger(chosenIndex)
+    ? (chosenIndex === Number(question.answer)
+        ? 'The student chose this correct option.'
+        : `The student chose ${String.fromCharCode(65 + chosenIndex)}.`)
+    : 'The student skipped this question.';
+
+  let response;
+  try {
+    response = await fetch(EXPLAIN_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        // Required for calls made straight from a browser rather than a server.
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: EXPLAIN_MODEL,
+        max_tokens: 4000,
+        system: EXPLAIN_SYSTEM,
+        messages: [{
+          role: 'user',
+          content: `Subject: ${question.section || question.subject || 'CA Foundation'}\n\nQuestion: ${question.text}\n\n${options}\n\nCorrect option: ${correctLetter}\n${chose}`
+        }]
+      })
+    });
+  } catch {
+    throw new ExplainError('network', 'Could not reach Claude. Check your connection and try again.');
+  }
+
+  if (!response.ok) {
+    let detail = '';
+    try { detail = (await response.json())?.error?.message || ''; } catch { /* not JSON */ }
+    if (response.status === 401 || response.status === 403) {
+      throw new ExplainError('bad-key', 'That API key was rejected. Check it in Help.');
+    }
+    if (response.status === 429) {
+      throw new ExplainError('rate-limit', 'Claude is rate limiting your key. Wait a moment and try again.');
+    }
+    if (response.status >= 500) {
+      throw new ExplainError('server', 'Claude is having trouble right now. Try again shortly.');
+    }
+    throw new ExplainError('http', detail || `The request failed (${response.status}).`);
+  }
+
+  const payload = await response.json();
+  if (payload.stop_reason === 'refusal') {
+    throw new ExplainError('refusal', 'Claude declined to answer this one.');
+  }
+  const text = (payload.content || [])
+    .filter(part => part.type === 'text')
+    .map(part => part.text)
+    .join('\n')
+    .trim();
+  if (!text) throw new ExplainError('empty', 'Claude returned an empty explanation.');
+
+  const parsed = parseExplanation(text);
+  cacheExplanation(question, parsed);
+  return parsed;
+}
+
+// Reasoning the question already carries needs no network call at all.
+function builtInExplanation(question) {
+  const reasoning = question.reasoning?.trim();
+  if (!reasoning) return null;
+  return { right: reasoning, wrong: '', remember: '', builtIn: true };
+}
+
+function explanationMarkup(parsed, { chosenIndex, question } = {}) {
+  if (!parsed) return '';
+  const wrongLetter = Number.isInteger(chosenIndex) && chosenIndex !== Number(question?.answer)
+    ? String.fromCharCode(65 + chosenIndex)
+    : null;
+  return `<div class="explanation">
+    ${parsed.right ? `<p class="explain-right"><b>Why ${String.fromCharCode(65 + Number(question?.answer ?? 0))} is right.</b> ${escapeHTML(parsed.right)}</p>` : ''}
+    ${parsed.wrong ? `<p class="explain-wrong"><b>Why ${wrongLetter ? `${wrongLetter} is` : 'yours was'} wrong.</b> ${escapeHTML(parsed.wrong)}</p>` : ''}
+    ${parsed.remember ? `<p class="explain-remember"><b>Remember.</b> ${escapeHTML(parsed.remember)}</p>` : ''}
+    <p class="explain-source">${parsed.builtIn ? 'Worked answer stored with this question.' : 'Written by Claude · always sanity-check against the ICAI material.'}</p>
+  </div>`;
+}
+
+// Renders into whatever container asked for it, so review mode and frenzy mode
+// share one code path.
+async function fillExplanation(container, question, chosenIndex) {
+  if (!container) return;
+  if (question.external) {
+    container.innerHTML = `<div class="explanation explain-empty"><p>This question is answered from the official PDF, so there is no wording here to explain. Open the source paper beside it from the <a href="#library">source library</a>.</p></div>`;
+    return;
+  }
+  const ready = builtInExplanation(question) || cachedExplanation(question);
+  if (ready) {
+    container.innerHTML = explanationMarkup(ready, { chosenIndex, question });
+    return;
+  }
+  if (!readApiKey()) {
+    container.innerHTML = `<div class="explanation explain-empty"><p>Explanations for this paper are written by Claude on request. Add your API key once in <a href="#help">Help</a> and it works everywhere.</p></div>`;
+    return;
+  }
+  container.innerHTML = `<div class="explanation explain-loading"><p>Working it out…</p></div>`;
+  try {
+    const parsed = await requestExplanation(question, chosenIndex);
+    container.innerHTML = explanationMarkup(parsed, { chosenIndex, question });
+    announce('Explanation ready.');
+  } catch (error) {
+    const help = error.code === 'no-key' || error.code === 'bad-key'
+      ? ' <a href="#help">Open Help</a>'
+      : '';
+    container.innerHTML = `<div class="explanation explain-error"><p>${escapeHTML(error.message)}${help}</p></div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Frenzy mode.
+//
+// Mixed-topic MCQs, one at a time, against a per-question clock. Three lives,
+// a streak multiplier, and a daily target. The part that makes it study rather
+// than a game: question selection is weighted toward the topics this student
+// keeps getting wrong, drawn from both frenzy runs and finished mock papers.
+// ---------------------------------------------------------------------------
+const FRENZY_STATS_KEY = 'foundation-test-lab:frenzy';
+const FRENZY_SECONDS = 30;
+const FRENZY_LIVES = 3;
+const FRENZY_DAILY_TARGET = 50;
+
+function readFrenzyStats() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(FRENZY_STATS_KEY)) || {};
+    return {
+      topics: stored.topics && typeof stored.topics === 'object' ? stored.topics : {},
+      bestScore: Number(stored.bestScore) || 0,
+      bestStreak: Number(stored.bestStreak) || 0,
+      runs: Number(stored.runs) || 0,
+      daily: stored.daily && typeof stored.daily === 'object' ? stored.daily : { date: '', count: 0 }
+    };
+  } catch {
+    return { topics: {}, bestScore: 0, bestStreak: 0, runs: 0, daily: { date: '', count: 0 } };
+  }
+}
+
+function writeFrenzyStats(stats) {
+  try { localStorage.setItem(FRENZY_STATS_KEY, JSON.stringify(stats)); }
+  catch { /* a full quota should not end the run */ }
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function dailyCount(stats = readFrenzyStats()) {
+  return stats.daily?.date === today() ? Number(stats.daily.count) || 0 : 0;
+}
+
+// Topic accuracy merges frenzy answers with the section breakdowns of every
+// finished MCQ paper, so the very first run is already aimed at weak areas.
+function topicAccuracy() {
+  const stats = readFrenzyStats();
+  const merged = {};
+  const add = (topic, seen, correct) => {
+    if (!topic) return;
+    merged[topic] ||= { seen: 0, correct: 0 };
+    merged[topic].seen += seen;
+    merged[topic].correct += correct;
+  };
+  Object.entries(stats.topics).forEach(([topic, row]) => add(topic, Number(row.seen) || 0, Number(row.correct) || 0));
+  ['economics', ...Object.keys(OFFICIAL_TESTS)].forEach(subject => {
+    for (let paper = 1; paper <= 10; paper += 1) {
+      const session = readSession(subject, paper);
+      if (!session?.completedAt || !session.sectionSnapshot) continue;
+      Object.entries(session.sectionSnapshot).forEach(([topic, row]) => add(topic, row.total, row.correct));
+    }
+  });
+  return merged;
+}
+
+// Weakest topics are drawn most often; a topic never attempted gets a mild
+// boost so the pool keeps widening instead of drilling three chapters forever.
+function topicWeight(topic, accuracy) {
+  const row = accuracy[topic];
+  if (!row || row.seen < 3) return 1.6;
+  return 1 + 2.4 * (1 - row.correct / row.seen);
+}
+
+async function buildFrenzyPool() {
+  const pool = [];
+  const data = await loadArtifact('economics');
+  data.papers.forEach(paper => {
+    paper.questions.forEach(question => {
+      if (!Number.isInteger(question.answer) || !question.options?.length) return;
+      pool.push({ ...question, topic: question.section || 'Business Economics', subject: 'Business Economics' });
+    });
+  });
+  Object.values(OFFICIAL_TESTS).forEach(test => {
+    test.questions.forEach(question => {
+      if (!Number.isInteger(question.answer) || !question.options?.length) return;
+      if (question.external) return;
+      pool.push({ ...question, topic: question.section || test.shortTitle, subject: test.shortTitle });
+    });
+  });
+  return pool;
+}
+
+function pickFrenzyQuestion(pool, seen) {
+  const accuracy = topicAccuracy();
+  const available = pool.filter(question => !seen.has(explanationId(question)));
+  const candidates = available.length ? available : pool;
+  const weights = candidates.map(question => topicWeight(question.topic, accuracy));
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  let cursor = Math.random() * total;
+  for (let index = 0; index < candidates.length; index += 1) {
+    cursor -= weights[index];
+    if (cursor <= 0) return candidates[index];
+  }
+  return candidates[candidates.length - 1];
+}
+
+function streakMultiplier(streak) {
+  if (streak >= 7) return 3;
+  if (streak >= 3) return 2;
+  return 1;
+}
+
+function renderFrenzyHub() {
+  stopTimer();
+  document.body.classList.remove('exam-active', 'frenzy-active');
+  activateNav('frenzy');
+  const stats = readFrenzyStats();
+  const done = dailyCount(stats);
+  const accuracy = topicAccuracy();
+  const weakest = Object.entries(accuracy)
+    .filter(([, row]) => row.seen >= 3)
+    .sort((a, b) => (a[1].correct / a[1].seen) - (b[1].correct / b[1].seen))
+    .slice(0, 5);
+  app.innerHTML = `
+    <section class="page-shell frenzy-hub">
+      <div class="frenzy-head">
+        <div>
+          <p class="eyebrow">Frenzy</p>
+          <h1>Mixed questions,<br>thirty seconds each.</h1>
+          <p>Questions from every topic, one after another, aimed at whatever you keep getting wrong. Three lives. Build a streak and every answer is worth more.</p>
+          <div class="hero-actions"><button class="button coral" data-action="frenzy-start">Start a run <span aria-hidden="true">→</span></button></div>
+        </div>
+        <div class="frenzy-board">
+          <div class="frenzy-board-row"><span>Best score</span><b>${stats.bestScore}</b></div>
+          <div class="frenzy-board-row"><span>Best streak</span><b>${stats.bestStreak}</b></div>
+          <div class="frenzy-board-row"><span>Runs</span><b>${stats.runs}</b></div>
+          <div class="frenzy-target">
+            <div class="frenzy-target-copy"><span>Today</span><b>${done} / ${FRENZY_DAILY_TARGET}</b></div>
+            <div class="frenzy-target-track"><span style="width:${Math.min(100, (done / FRENZY_DAILY_TARGET) * 100)}%"></span></div>
+            <p>${done >= FRENZY_DAILY_TARGET ? 'Target hit. Anything more is a bonus.' : `${FRENZY_DAILY_TARGET - done} more questions to hit today's target.`}</p>
+          </div>
+        </div>
+      </div>
+      ${weakest.length ? `<section class="help-panel">
+        <h2>What it will throw at you most</h2>
+        <p>Worked out from your frenzy answers and your finished papers. The weaker the topic, the more often it comes up.</p>
+        <div class="weak-list">${weakest.map(([topic, row]) => {
+          const percent = Math.round((row.correct / row.seen) * 100);
+          return `<div class="weak-row"><span>${escapeHTML(topic)}</span><div class="breakdown-track"><span style="width:${percent}%"></span></div><b>${percent}%</b></div>`;
+        }).join('')}</div>
+      </section>` : `<section class="help-panel"><h2>No weak spots recorded yet</h2><p>Finish a paper or a frenzy run and this page starts aiming questions at the topics you are losing marks on.</p></section>`}
+      <div class="help-grid">
+        <article class="help-card"><span class="help-step">3</span><h2>Three lives</h2><p>A wrong answer or a timeout costs one. The run ends at zero, and nothing is lost — your topic record keeps everything.</p></article>
+        <article class="help-card"><span class="help-step">×3</span><h2>Streak multiplier</h2><p>Three in a row doubles each answer, seven in a row triples it. Answer fast and the leftover seconds are added on.</p></article>
+        <article class="help-card"><span class="help-step">?</span><h2>Instant why</h2><p>Get one wrong and the correct answer appears straight away, with an explanation if you have turned those on in <a href="#help">Help</a>.</p></article>
+      </div>
+    </section>`;
+  finishRender();
+}
+
+async function startFrenzy() {
+  loading('Shuffling questions across every topic…');
+  try {
+    const pool = await buildFrenzyPool();
+    if (!pool.length) throw new Error('No questions are available for frenzy mode.');
+    // Drop any exam context so the shared timer helpers cannot write a frenzy
+    // run back over a paper's saved session.
+    state.session = null;
+    state.subject = null;
+    state.customTest = null;
+    state.frenzy = {
+      pool,
+      seen: new Set(),
+      question: null,
+      chosen: null,
+      lives: FRENZY_LIVES,
+      score: 0,
+      streak: 0,
+      bestStreak: 0,
+      answered: 0,
+      correct: 0,
+      remaining: FRENZY_SECONDS,
+      phase: 'question',
+      topics: {}
+    };
+    nextFrenzyQuestion();
+  } catch (error) { renderError(error); }
+}
+
+function nextFrenzyQuestion() {
+  const run = state.frenzy;
+  if (!run) return navigate('#frenzy');
+  run.question = pickFrenzyQuestion(run.pool, run.seen);
+  run.seen.add(explanationId(run.question));
+  run.chosen = null;
+  run.phase = 'question';
+  run.remaining = FRENZY_SECONDS;
+  renderFrenzyRun();
+  startFrenzyClock();
+}
+
+function startFrenzyClock() {
+  stopTimer();
+  state.timer = window.setInterval(() => {
+    const run = state.frenzy;
+    if (!run || run.phase !== 'question') return;
+    if (document.hidden) return;
+    run.remaining -= 1;
+    paintFrenzyClock();
+    if (run.remaining <= 0) answerFrenzy(null);
+  }, 1000);
+}
+
+function paintFrenzyClock() {
+  const run = state.frenzy;
+  if (!run) return;
+  const bar = document.querySelector('[data-frenzy-bar]');
+  if (bar) {
+    bar.style.width = `${Math.max(0, (run.remaining / FRENZY_SECONDS) * 100)}%`;
+    bar.classList.toggle('low', run.remaining <= 8);
+  }
+  const count = document.querySelector('[data-frenzy-seconds]');
+  if (count) count.textContent = `${Math.max(0, run.remaining)}s`;
+}
+
+function renderFrenzyRun() {
+  const run = state.frenzy;
+  if (!run?.question) return navigate('#frenzy');
+  stopTimerDisplayOnly();
+  document.body.classList.remove('exam-active');
+  document.body.classList.add('frenzy-active');
+  activateNav('frenzy');
+  const question = run.question;
+  const answered = run.phase === 'feedback';
+  const multiplier = streakMultiplier(run.streak);
+  app.innerHTML = `
+    <section class="frenzy-run">
+      <header class="frenzy-bar">
+        <button class="button ghost small" data-action="frenzy-quit">End run</button>
+        <span class="frenzy-lives" aria-label="${run.lives} lives left">${Array.from({ length: FRENZY_LIVES }, (_, index) => `<i class="${index < run.lives ? 'on' : ''}" aria-hidden="true"></i>`).join('')}</span>
+        <span class="frenzy-score"><b>${run.score}</b> points</span>
+        <span class="frenzy-streak ${multiplier > 1 ? 'hot' : ''}">${run.streak} streak${multiplier > 1 ? ` · ×${multiplier}` : ''}</span>
+        <span class="frenzy-seconds" data-frenzy-seconds>${Math.max(0, run.remaining)}s</span>
+      </header>
+      <div class="frenzy-track"><span data-frenzy-bar style="width:${(run.remaining / FRENZY_SECONDS) * 100}%"></span></div>
+      <div class="frenzy-body">
+        <p class="frenzy-topic">${escapeHTML(question.topic || question.subject || 'Mixed')}</p>
+        <h1 class="question-text">${escapeHTML(question.text)}</h1>
+        <div class="options" role="radiogroup" aria-label="Answer options">
+          ${question.options.map((option, index) => {
+            const isCorrect = answered && index === question.answer;
+            const isWrong = answered && run.chosen === index && index !== question.answer;
+            return `<button class="option ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" data-action="frenzy-answer" data-index="${index}" role="radio" tabindex="${index === 0 ? 0 : -1}" aria-checked="${run.chosen === index}" ${answered ? 'disabled' : ''}><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`;
+          }).join('')}
+        </div>
+        ${answered ? `<div class="frenzy-feedback">
+          <p class="frenzy-verdict ${run.chosen === question.answer ? 'right' : 'wrong'}">${run.chosen === question.answer ? `Correct · +${run.lastPoints} points` : run.chosen === null ? `Out of time · the answer was ${String.fromCharCode(65 + question.answer)}` : `Not quite · the answer was ${String.fromCharCode(65 + question.answer)}`}</p>
+          <div class="explain-slot" data-explain-slot></div>
+          <div class="frenzy-actions">
+            <button class="button coral" data-action="frenzy-next">${run.lives > 0 ? 'Next question →' : 'See how you did →'}</button>
+            <button class="button secondary explain-button" data-action="frenzy-explain">Explain this</button>
+          </div>
+        </div>` : `<p class="shortcut-hint">Press <kbd>A</kbd>–<kbd>D</kbd> to answer.</p>`}
+      </div>
+    </section>`;
+  if (answered) hydrateFrenzyExplanation();
+  finishRender();
+}
+
+// The run clock is our own interval; the shared stopTimer would also try to
+// persist an exam session that frenzy mode does not have.
+function stopTimerDisplayOnly() {
+  if (state.timer) window.clearInterval(state.timer);
+  state.timer = null;
+}
+
+function hydrateFrenzyExplanation() {
+  const run = state.frenzy;
+  const ready = builtInExplanation(run.question) || cachedExplanation(run.question);
+  if (!ready) return;
+  const slot = document.querySelector('[data-explain-slot]');
+  if (!slot) return;
+  slot.innerHTML = explanationMarkup(ready, { chosenIndex: run.chosen, question: run.question });
+  document.querySelector('.explain-button')?.remove();
+}
+
+function answerFrenzy(index) {
+  const run = state.frenzy;
+  if (!run || run.phase !== 'question') return;
+  stopTimerDisplayOnly();
+  run.chosen = index;
+  run.phase = 'feedback';
+  run.answered += 1;
+  const right = index === run.question.answer;
+  const topic = run.question.topic || 'Mixed';
+  run.topics[topic] ||= { seen: 0, correct: 0 };
+  run.topics[topic].seen += 1;
+  if (right) {
+    run.topics[topic].correct += 1;
+    run.correct += 1;
+    run.streak += 1;
+    run.bestStreak = Math.max(run.bestStreak, run.streak);
+    // The badge shows the multiplier for the streak you have just reached, so
+    // this answer must be paid at that rate rather than the previous one.
+    run.lastPoints = 10 * streakMultiplier(run.streak) + Math.max(0, run.remaining);
+    run.score += run.lastPoints;
+  } else {
+    run.streak = 0;
+    run.lives -= 1;
+    run.lastPoints = 0;
+  }
+  recordFrenzyAnswer(topic, right);
+  renderFrenzyRun();
+  announce(right ? `Correct. ${run.score} points, streak ${run.streak}.` : `Wrong. The answer was ${String.fromCharCode(65 + run.question.answer)}. ${run.lives} lives left.`);
+}
+
+function recordFrenzyAnswer(topic, right) {
+  const stats = readFrenzyStats();
+  stats.topics[topic] ||= { seen: 0, correct: 0 };
+  stats.topics[topic].seen += 1;
+  if (right) stats.topics[topic].correct += 1;
+  if (stats.daily?.date === today()) stats.daily.count = (Number(stats.daily.count) || 0) + 1;
+  else stats.daily = { date: today(), count: 1 };
+  writeFrenzyStats(stats);
+}
+
+function endFrenzyRun() {
+  const run = state.frenzy;
+  stopTimerDisplayOnly();
+  if (!run) return navigate('#frenzy');
+  const stats = readFrenzyStats();
+  const beatScore = run.score > stats.bestScore;
+  const beatStreak = run.bestStreak > stats.bestStreak;
+  stats.bestScore = Math.max(stats.bestScore, run.score);
+  stats.bestStreak = Math.max(stats.bestStreak, run.bestStreak);
+  stats.runs += 1;
+  writeFrenzyStats(stats);
+  document.body.classList.remove('frenzy-active');
+  const accuracy = run.answered ? Math.round((run.correct / run.answered) * 100) : 0;
+  const rows = Object.entries(run.topics).sort((a, b) => b[1].seen - a[1].seen);
+  app.innerHTML = `
+    <section class="page-shell results-page">
+      <div class="result-hero">
+        <div class="score-ring" style="--score:${accuracy}"><div class="score-ring-inner"><span><b>${run.score}</b><small>points</small></span></div></div>
+        <div>
+          <p class="eyebrow">Run over</p>
+          <h1>${beatScore ? 'A new best score.' : run.bestStreak >= 7 ? 'That was a serious streak.' : accuracy >= 70 ? 'Sharp run.' : 'Now you know where to aim.'}</h1>
+          <p>${run.correct} of ${run.answered} correct, best streak ${run.bestStreak}${beatStreak ? ' — a personal best' : ''}. Every answer has been added to your topic record, so the next run targets what is still shaky.</p>
+          <div class="result-actions"><button class="button coral" data-action="frenzy-start">Run it again</button><button class="button secondary" data-action="frenzy-hub">Back to frenzy</button></div>
+        </div>
+      </div>
+      <div class="result-grid">
+        <article class="result-stat correct"><span>Correct</span><b>${run.correct}</b></article>
+        <article class="result-stat wrong"><span>Wrong</span><b>${run.answered - run.correct}</b></article>
+        <article class="result-stat"><span>Accuracy</span><b>${accuracy}%</b></article>
+        <article class="result-stat"><span>Today</span><b>${dailyCount()}/${FRENZY_DAILY_TARGET}</b></article>
+      </div>
+      ${rows.length ? `<div class="result-breakdown"><h2>How each topic went</h2>${rows.map(([topic, row]) => `<div class="breakdown-row"><span>${escapeHTML(topic)}</span><div class="breakdown-track"><span style="width:${(row.correct / row.seen) * 100}%"></span></div><b>${row.correct}/${row.seen}</b></div>`).join('')}</div>` : ''}
+    </section>`;
+  state.frenzy = null;
+  finishRender();
 }
 
 function renderHome() {
@@ -1210,6 +1806,19 @@ function renderHome() {
             <div class="card-footer"><span class="card-stat"><b>60 min</b> Official sprint</span><button class="round-arrow" data-action="start-official" data-subject="quantitative" aria-label="Start Quantitative Aptitude sprint">→</button></div>
           </article>
         </div>
+      </div>
+    </section>
+
+    <section class="section frenzy-promo-section">
+      <div class="page-shell">
+        <a class="frenzy-promo" href="#frenzy">
+          <div>
+            <p class="eyebrow">Frenzy</p>
+            <h2>Ten minutes? Take a run.</h2>
+            <p>Mixed questions from every topic, thirty seconds each, three lives — weighted toward whatever you keep getting wrong.</p>
+          </div>
+          <span class="frenzy-promo-stat"><b>${dailyCount()}</b><small>done today</small></span>
+        </a>
       </div>
     </section>
 
@@ -1486,7 +2095,7 @@ const SHORTCUT_HELP = `<h2 id="modal-title">Keyboard shortcuts</h2>
     <div><dt><kbd>?</kbd></dt><dd>Show this list</dd></div>
     <div><dt><kbd>Esc</kbd></dt><dd>Close whatever is open</dd></div>
   </dl>
-  <p class="modal-note">Left and right always move through the paper; up and down move down the four answers. Nothing here needs the mouse.</p>`;
+  <p class="modal-note">Left and right always move through the paper; up and down move down the four answers. In frenzy mode, <kbd>A</kbd>&ndash;<kbd>D</kbd> answers and <kbd>Enter</kbd> takes the next question. Nothing here needs the mouse.</p>`;
 
 function renderExamSidebar(test, result = null) {
   const answered = Object.keys(state.session.answers).length;
@@ -1566,7 +2175,9 @@ function renderMcqExam() {
               return `<button class="option ${selected === index ? 'selected' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" data-action="select-option" data-index="${index}" role="radio" tabindex="${roving}" aria-checked="${selected === index}" ${state.review ? 'disabled' : ''}><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`;
             }).join('')}
           </div>
-          ${state.review ? `<p class="review-note">Correct answer: ${String.fromCharCode(65 + question.answer)}${hasAnswer ? selected === question.answer ? ' · Your response was correct.' : ` · You selected ${String.fromCharCode(65 + selected)}.` : ' · You skipped this question.'}</p>` : ''}
+          ${state.review ? `<p class="review-note">Correct answer: ${String.fromCharCode(65 + question.answer)}${hasAnswer ? selected === question.answer ? ' · Your response was correct.' : ` · You selected ${String.fromCharCode(65 + selected)}.` : ' · You skipped this question.'}</p>
+          <div class="explain-slot" data-explain-slot></div>
+          <button class="button secondary small explain-button" data-action="explain">Explain this answer</button>` : ''}
         </article>
         <div class="exam-controls">
           <div class="exam-controls-group"><button class="button secondary small" data-action="previous" ${state.current === 0 ? 'disabled' : ''}>← Previous</button>${state.review ? '' : `<button class="button ghost small" data-action="toggle-flag">${flagged ? 'Unmark review' : 'Mark for review'}</button>`}</div>
@@ -1581,8 +2192,19 @@ function renderMcqExam() {
     submitMcq(true);
   });
   else stopTimer();
+  if (state.review) hydrateReviewExplanation(question, hasAnswer ? selected : null);
   renderPauseOverlay();
   finishRender();
+}
+
+// A stored or already-paid-for explanation appears without being asked for;
+// anything that would cost a request waits behind the button.
+function hydrateReviewExplanation(question, chosenIndex) {
+  const slot = document.querySelector('[data-explain-slot]');
+  const ready = question.external ? null : (builtInExplanation(question) || cachedExplanation(question));
+  if (!slot || !ready) return;
+  slot.innerHTML = explanationMarkup(ready, { chosenIndex, question });
+  document.querySelector('.explain-button')?.remove();
 }
 
 function calculateResult(test) {
@@ -1614,6 +2236,9 @@ function submitMcq(auto = false) {
     return;
   }
   state.session.completedAt = Date.now();
+  // Frenzy mode reads this back to work out which topics need drilling.
+  const result = calculateResult(test);
+  state.session.sectionSnapshot = Object.fromEntries([...result.sections.entries()]);
   writeSession();
   stopTimer();
   closeModal();
@@ -1984,11 +2609,13 @@ async function route() {
   closeModal();
   stopTimer();
   document.querySelector('#pause-overlay')?.remove();
-  document.body.classList.remove('exam-paused');
+  document.body.classList.remove('exam-paused', 'frenzy-active');
+  if (state.frenzy && !location.hash.startsWith('#frenzy')) state.frenzy = null;
   const parts = location.hash.replace(/^#/, '').split('/').filter(Boolean);
   const page = parts[0] || 'home';
   if (page === 'home') return renderHome();
   if (page === 'help') return renderHelp();
+  if (page === 'frenzy') return renderFrenzyHub();
   if (page === 'library') return renderLibrary();
   if (page === 'create') return renderCreateHub();
   if (page === 'custom' && parts[1]) return startCustomTest(parts[1]);
@@ -2016,6 +2643,47 @@ document.addEventListener('click', async event => {
   if (action === 'open-palette') return openPaletteModal();
   if (action === 'shortcut-help') return openModal(SHORTCUT_HELP);
   if (action === 'toggle-pause') return togglePause();
+  if (action === 'frenzy-hub') return navigate('#frenzy');
+  if (action === 'frenzy-start') return startFrenzy();
+  if (action === 'frenzy-answer') return answerFrenzy(Number(control.dataset.index));
+  if (action === 'frenzy-next') {
+    if (!state.frenzy) return navigate('#frenzy');
+    return state.frenzy.lives > 0 ? nextFrenzyQuestion() : endFrenzyRun();
+  }
+  if (action === 'frenzy-quit') return endFrenzyRun();
+  if (action === 'frenzy-explain') {
+    const run = state.frenzy;
+    if (!run?.question) return;
+    control.remove();
+    return fillExplanation(document.querySelector('[data-explain-slot]'), run.question, run.chosen);
+  }
+  if (action === 'explain') {
+    const test = currentTest();
+    const question = test?.questions[state.current];
+    if (!question) return;
+    control.remove();
+    const chosen = Object.prototype.hasOwnProperty.call(state.session?.answers || {}, state.current)
+      ? state.session.answers[state.current]
+      : null;
+    return fillExplanation(document.querySelector('[data-explain-slot]'), question, chosen);
+  }
+  if (action === 'save-api-key') {
+    const field = document.querySelector('[data-api-key-input]');
+    const value = (field?.value || '').trim();
+    writeApiKey(value);
+    renderHelp();
+    return toast(value ? 'Key saved in this browser. Explanations are on.' : 'Key removed from this browser.');
+  }
+  if (action === 'clear-api-key') {
+    writeApiKey('');
+    renderHelp();
+    return toast('Key removed from this browser.');
+  }
+  if (action === 'clear-explanations') {
+    try { localStorage.removeItem(EXPLAIN_CACHE_KEY); } catch { /* ignore */ }
+    renderHelp();
+    return toast('Saved explanations cleared.');
+  }
   if (action === 'backup-download') {
     const summary = document.querySelector('[data-backup-summary]');
     const bytes = Number(summary?.dataset.photoBytes || 0);
@@ -2384,6 +3052,21 @@ function moveOptionFocus(step) {
   return true;
 }
 
+function insideOptionsNow() {
+  return Boolean(document.activeElement?.closest?.('.options'));
+}
+
+function moveFrenzyFocus(step) {
+  const options = [...document.querySelectorAll('.options .option:not([disabled])')];
+  if (options.length < 2) return false;
+  const from = options.indexOf(document.activeElement);
+  if (from < 0) return false;
+  const next = options[(from + step + options.length) % options.length];
+  options.forEach(option => { option.tabIndex = option === next ? 0 : -1; });
+  next.focus();
+  return true;
+}
+
 function chooseOption(index) {
   const options = [...document.querySelectorAll('.options .option:not([disabled])')];
   const target = options[index];
@@ -2404,7 +3087,29 @@ document.addEventListener('keydown', event => {
   const typing = target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 
   if (event.key === '?' && !typing) { event.preventDefault(); return openModal(SHORTCUT_HELP); }
-  if (typing || !document.body.classList.contains('exam-active')) return;
+  if (typing) return;
+
+  // Frenzy has its own, much smaller, key set.
+  if (document.body.classList.contains('frenzy-active')) {
+    const run = state.frenzy;
+    if (!run) return;
+    const pressed = event.key.toLowerCase();
+    if (run.phase === 'feedback') {
+      if (pressed === 'enter' || pressed === ' ' || event.key === 'ArrowRight' || pressed === 'n') {
+        event.preventDefault();
+        document.querySelector('[data-action="frenzy-next"]')?.click();
+      }
+      return;
+    }
+    if (pressed >= 'a' && pressed <= 'd' && pressed.length === 1) { event.preventDefault(); return answerFrenzy(pressed.charCodeAt(0) - 97); }
+    if (pressed >= '1' && pressed <= '4' && pressed.length === 1) { event.preventDefault(); return answerFrenzy(Number(pressed) - 1); }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (insideOptionsNow() && moveFrenzyFocus(event.key === 'ArrowDown' ? 1 : -1)) event.preventDefault();
+    }
+    return;
+  }
+
+  if (!document.body.classList.contains('exam-active')) return;
   if (state.session?.paused) return;
 
   const insideOptions = Boolean(target?.closest?.('.options'));
