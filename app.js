@@ -317,6 +317,24 @@ function buildGeneratedQuantitativeQuestions() {
 
 const quantitativeFullQuestions = [...quantitativeQuestions, ...buildGeneratedQuantitativeQuestions()];
 
+async function loadQuantitativeQuestions() {
+  if (cache.has('quantitative-claude')) return cache.get('quantitative-claude');
+  try {
+    const response = await fetch('data/quantitative-claude.json');
+    if (!response.ok) throw new Error('Generated question file unavailable.');
+    const sourceQuestions = await response.json();
+    if (!Array.isArray(sourceQuestions) || sourceQuestions.length !== 30) throw new Error('Generated question file is incomplete.');
+    const questions = [...sourceQuestions, ...buildGeneratedQuantitativeQuestions()].map((question, index) => ({ ...question, number: index + 1 }));
+    if (questions.length !== 100) throw new Error('Quantitative question set must contain exactly 100 questions.');
+    cache.set('quantitative-claude', questions);
+    return questions;
+  } catch (error) {
+    // Keep the app usable if a user has an old offline cache without the new
+    // generated file; the bundled fallback still has the fixed 100-question shape.
+    return quantitativeFullQuestions;
+  }
+}
+
 const OFFICIAL_TESTS = {
   'official-economics': {
     id: 'official-economics',
@@ -338,7 +356,7 @@ const OFFICIAL_TESTS = {
     negative: .25,
     questions: quantitativeFullQuestions,
     sourcePdf: 'assets/pdfs/sep-2026-quantitative-aptitude-rtp.pdf',
-    sourceNote: 'The first 30 questions follow the supplied RTP source. The remaining 70 are labelled generated practice questions with stored reasoning and verification, completing the 100-MCQ Foundation format.'
+    sourceNote: 'Questions 1–30 are generated through the Anthropic question-setter pipeline and carry reasoning plus verification. Questions 31–100 are deterministic verified practice, completing the 100-MCQ Foundation format.'
   }
 };
 
@@ -840,6 +858,9 @@ function getOfficialTest(id) {
 }
 
 function currentTest() {
+  if (state.subject === 'quantitative' && state.data?.questions) {
+    return { ...getOfficialTest('quantitative'), questions: state.data.questions };
+  }
   if (getOfficialTest(state.subject)) return getOfficialTest(state.subject);
   if (state.subject === 'economics' && state.data) {
     const paper = state.data.papers[state.paper - 1];
@@ -1190,7 +1211,8 @@ async function refreshBackupSummary() {
 // api.anthropic.com. Every answer is cached locally, so a question is only ever
 // paid for once and re-reads work offline.
 // ---------------------------------------------------------------------------
-const EXPLAIN_MODEL = 'claude-opus-5';
+// This account's live model catalogue exposes the stable Sonnet 5 alias.
+const EXPLAIN_MODEL = 'claude-sonnet-5';
 const API_KEY_STORAGE = 'foundation-test-lab:api-key';
 const EXPLAIN_CACHE_KEY = 'foundation-test-lab:explanations';
 const EXPLAIN_ENDPOINT = 'https://api.anthropic.com/v1/messages';
@@ -1495,7 +1517,8 @@ async function buildFrenzyPool() {
       pool.push({ ...question, topic: question.section || 'Business Economics', subject: 'Business Economics' });
     });
   });
-  Object.values(OFFICIAL_TESTS).forEach(test => {
+  const officialSets = { ...OFFICIAL_TESTS, quantitative: { ...OFFICIAL_TESTS.quantitative, questions: await loadQuantitativeQuestions() } };
+  Object.values(officialSets).forEach(test => {
     test.questions.forEach(question => {
       if (!Number.isInteger(question.answer) || !question.options?.length) return;
       if (question.external) return;
@@ -1815,7 +1838,7 @@ function renderHome() {
     <section class="section alt">
       <div class="page-shell">
         <div class="section-heading">
-          <div><p class="eyebrow">Full mock series</p><h2>Choose your paper.</h2><p>Thirty linked mock papers, rebuilt as an active workspace rather than a page to scroll.</p></div>
+        <div><p class="eyebrow">Full mock series</p><h2>Choose your paper.</h2><p>Thirty-one linked mock papers, rebuilt as an active workspace rather than a page to scroll.</p></div>
           <a class="button ghost small" href="#library">View source library</a>
         </div>
         <div class="subject-grid">
@@ -1835,9 +1858,9 @@ function renderHome() {
             <div class="card-footer"><span class="card-stat"><b>2 hours</b> +1 / −0.25</span><button class="round-arrow" data-action="pick" data-subject="economics" aria-label="Choose a Business Economics mock">→</button></div>
           </article>
           <article class="subject-card" data-number="3">
-            <div class="card-top"><span class="paper-chip">Paper 3</span><span class="card-stat"><b>30</b> MCQs</span></div>
-            <h3>Quantitative Aptitude</h3><p>Use the official RTP beside a fast A–D response sheet with the published answer key.</p>
-            <div class="card-footer"><span class="card-stat"><b>60 min</b> Official sprint</span><button class="round-arrow" data-action="start-official" data-subject="quantitative" aria-label="Start Quantitative Aptitude sprint">→</button></div>
+            <div class="card-top"><span class="paper-chip">Paper 3</span><span class="card-stat"><b>100</b> MCQs</span></div>
+            <h3>Quantitative Aptitude</h3><p>Complete the full two-hour paper: the supplied RTP source questions plus verified generated practice.</p>
+            <div class="card-footer"><span class="card-stat"><b>2 hours</b> Full-format mock</span><button class="round-arrow" data-action="start-official" data-subject="quantitative" aria-label="Start Quantitative Aptitude full mock">→</button></div>
           </article>
         </div>
       </div>
@@ -1861,7 +1884,7 @@ function renderHome() {
         <div class="section-heading"><div><p class="eyebrow">Official RTP sprints</p><h2>Short, sharp, scored.</h2><p>Quick tests drawn directly from the September 2026 revision papers.</p></div></div>
         <div class="sprint-row">
           <article class="sprint-card"><div><h3>Business Economics · 25</h3><p>Questions, choices, and the official answer key are all inside the test.</p><button class="button small" data-action="start-official" data-subject="official-economics">Begin sprint</button></div><span class="sprint-badge"><span><b>45</b> min</span></span></article>
-          <article class="sprint-card"><div><h3>Quantitative Aptitude · 30</h3><p>Read equations in the source PDF and record your answers in the response desk.</p><button class="button small" data-action="start-official" data-subject="quantitative">Begin sprint</button></div><span class="sprint-badge"><span><b>60</b> min</span></span></article>
+          <article class="sprint-card"><div><h3>Quantitative Aptitude · 100</h3><p>Full-format Paper 3: 100 MCQs in two hours. The supplied 30-question RTP remains available in the source library.</p><button class="button small" data-action="start-official" data-subject="quantitative">Begin full mock</button></div><span class="sprint-badge"><span><b>120</b> min</span></span></article>
         </div>
       </div>
     </section>
@@ -2168,7 +2191,11 @@ async function startMcq(subject, paper = 1, options = {}) {
     state.paper = Number(paper) || 1;
     state.current = options.current ?? 0;
     state.review = Boolean(options.review);
-    state.data = subject === 'economics' ? await loadArtifact('economics') : null;
+    state.data = subject === 'economics'
+      ? await loadArtifact('economics')
+      : subject === 'quantitative'
+        ? { questions: await loadQuantitativeQuestions() }
+        : null;
     const test = currentTest();
     state.session = readSession(subject, state.paper);
     if (!state.session || (!state.review && state.session.completedAt)) {
@@ -2286,7 +2313,11 @@ function renderMcqResults(subject, paper) {
   state.subject = subject;
   state.paper = Number(paper) || 1;
   const begin = async () => {
-    state.data = subject === 'economics' ? await loadArtifact('economics') : null;
+    state.data = subject === 'economics'
+      ? await loadArtifact('economics')
+      : subject === 'quantitative'
+        ? { questions: await loadQuantitativeQuestions() }
+        : null;
     state.session = readSession(subject, state.paper);
     const test = currentTest();
     if (!state.session || !test) return renderError(new Error('No completed attempt was found for this paper.'));
@@ -2590,6 +2621,7 @@ function renderCustomExam() {
   state.current = test.questions.indexOf(question);
   const selected = state.session.answers[state.current];
   const hasAnswer = Object.prototype.hasOwnProperty.call(state.session.answers, state.current);
+  const isAttempted = (state.session.selectedQuestions || [0]).includes(state.current);
   const sourceMeta = `<div class="custom-question-source"><span class="source-badge ${question.sourceType || 'custom'}">${escapeHTML(question.sourceLabel || 'Your question')}</span>${question.sourceUrl ? `<a href="${escapeHTML(question.sourceUrl)}" target="_blank" rel="noopener">Source ↗</a>` : ''}</div>`;
   const reasoning = question.reasoning?.trim() ? `<details class="custom-rationale"><summary>${question.sourceType === 'generated' ? 'Verified reasoning' : 'Answer reasoning'}</summary><p>${escapeHTML(question.reasoning)}</p>${question.verification?.checks?.length ? `<small>${escapeHTML(question.verification.checks.join(' · '))}</small>` : ''}</details>` : '';
   const body = question.type === 'mcq'

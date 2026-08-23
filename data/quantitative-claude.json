@@ -1,0 +1,693 @@
+[
+  {
+    "number": 1,
+    "section": "Business Mathematics",
+    "text": "Find the simple interest on Rs. 12,000 at 8% per annum for 3 years.",
+    "options": [
+      "Rs. 2,880",
+      "Rs. 2,800",
+      "Rs. 3,200",
+      "Rs. 2,400"
+    ],
+    "answer": 0,
+    "reasoning": "SI = PRT/100 = (12000 × 8 × 3)/100 = Rs. 2,880",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Direct formula computation",
+      "checks": [
+        "Formula SI=PRT/100 applied correctly",
+        "Arithmetic re-verified: 12000×8×3=288000, /100=2880"
+      ]
+    }
+  },
+  {
+    "number": 2,
+    "section": "Business Mathematics",
+    "text": "Find the compound interest on Rs. 10,000 at 10% per annum for 2 years, compounded annually.",
+    "options": [
+      "Rs. 2,100",
+      "Rs. 2,000",
+      "Rs. 2,200",
+      "Rs. 1,900"
+    ],
+    "answer": 0,
+    "reasoning": "CI = P[(1+r/100)^n - 1] = 10000[(1.1)^2 - 1] = 10000 × 0.21 = Rs. 2,100",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Direct formula computation",
+      "checks": [
+        "(1.1)^2 = 1.21 confirmed",
+        "10000×0.21=2100 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 3,
+    "section": "Business Mathematics",
+    "text": "Rs. 1,200 is divided among A, B and C in the ratio 2:3:5. Find B's share.",
+    "options": [
+      "Rs. 360",
+      "Rs. 400",
+      "Rs. 300",
+      "Rs. 480"
+    ],
+    "answer": 0,
+    "reasoning": "Total parts = 2+3+5 = 10; B's share = (3/10) × 1200 = Rs. 360",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Ratio division check",
+      "checks": [
+        "Sum of parts confirmed as 10",
+        "3/10 of 1200 = 360 verified"
+      ]
+    }
+  },
+  {
+    "number": 4,
+    "section": "Business Mathematics",
+    "text": "Find the value of log₂ 32.",
+    "options": [
+      "5",
+      "4",
+      "6",
+      "3"
+    ],
+    "answer": 0,
+    "reasoning": "2^5 = 32, therefore log₂32 = 5",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Exponent verification",
+      "checks": [
+        "2^5=32 confirmed by direct multiplication"
+      ]
+    }
+  },
+  {
+    "number": 5,
+    "section": "Business Mathematics",
+    "text": "Simplify: (2³ × 2⁴) / 2⁵",
+    "options": [
+      "4",
+      "8",
+      "2",
+      "16"
+    ],
+    "answer": 0,
+    "reasoning": "Using laws of indices: 2^(3+4-5) = 2² = 4",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Index law application",
+      "checks": [
+        "Exponent addition/subtraction: 3+4-5=2 confirmed",
+        "2^2=4 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 6,
+    "section": "Business Mathematics",
+    "text": "Solve for x: 3x + 5 = 20",
+    "options": [
+      "5",
+      "4",
+      "6",
+      "3"
+    ],
+    "answer": 0,
+    "reasoning": "3x = 15, so x = 5",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Direct algebraic solving",
+      "checks": [
+        "Substitution check: 3(5)+5=20 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 7,
+    "section": "Business Mathematics",
+    "text": "Find the sum of the roots of the quadratic equation x² - 7x + 12 = 0.",
+    "options": [
+      "7",
+      "5",
+      "12",
+      "-7"
+    ],
+    "answer": 0,
+    "reasoning": "Sum of roots = -b/a = -(-7)/1 = 7",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Formula-based verification",
+      "checks": [
+        "Roots are 3 and 4 (factorization: (x-3)(x-4)=0)",
+        "Sum 3+4=7 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 8,
+    "section": "Business Mathematics",
+    "text": "In how many ways can the letters of the word 'MATHS' be arranged?",
+    "options": [
+      "120",
+      "60",
+      "24",
+      "720"
+    ],
+    "answer": 0,
+    "reasoning": "All 5 letters are distinct, so arrangements = 5! = 120",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Factorial computation",
+      "checks": [
+        "5!=5×4×3×2×1=120 confirmed",
+        "No repeated letters in MATHS confirmed"
+      ]
+    }
+  },
+  {
+    "number": 9,
+    "section": "Business Mathematics",
+    "text": "In how many ways can a committee of 3 members be selected from 8 people?",
+    "options": [
+      "56",
+      "336",
+      "24",
+      "168"
+    ],
+    "answer": 0,
+    "reasoning": "C(8,3) = 8!/(3!×5!) = (8×7×6)/(3×2×1) = 56",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Combination formula computation",
+      "checks": [
+        "8×7×6=336",
+        "336/6=56 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 10,
+    "section": "Business Mathematics",
+    "text": "If n(A) = 15, n(B) = 10 and n(A∩B) = 5, find n(A∪B).",
+    "options": [
+      "20",
+      "25",
+      "15",
+      "30"
+    ],
+    "answer": 0,
+    "reasoning": "n(A∪B) = n(A) + n(B) - n(A∩B) = 15+10-5 = 20",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Set theory formula check",
+      "checks": [
+        "Formula applied correctly",
+        "15+10-5=20 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 11,
+    "section": "Business Mathematics",
+    "text": "Find the 10th term of the Arithmetic Progression: 4, 7, 10, 13, ...",
+    "options": [
+      "31",
+      "30",
+      "34",
+      "28"
+    ],
+    "answer": 0,
+    "reasoning": "a₁₀ = a + (n-1)d = 4 + 9×3 = 31",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "AP nth term formula",
+      "checks": [
+        "Common difference d=3 confirmed from series",
+        "4+27=31 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 12,
+    "section": "Business Mathematics",
+    "text": "Find the 5th term of the Geometric Progression whose first term is 3 and common ratio is 2.",
+    "options": [
+      "48",
+      "24",
+      "96",
+      "32"
+    ],
+    "answer": 0,
+    "reasoning": "a₅ = a × r^(n-1) = 3 × 2⁴ = 3 × 16 = 48",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "GP nth term formula",
+      "checks": [
+        "2^4=16 confirmed",
+        "3×16=48 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 13,
+    "section": "Business Mathematics",
+    "text": "Find the future value of an annuity of Rs. 1,000 per annum for 3 years at 10% p.a. compounded annually.",
+    "options": [
+      "Rs. 3,310",
+      "Rs. 3,300",
+      "Rs. 3,000",
+      "Rs. 3,100"
+    ],
+    "answer": 0,
+    "reasoning": "FV = 1000 × [(1.1)³ - 1]/0.1 = 1000 × (1.331-1)/0.1 = 1000 × 3.31 = Rs. 3,310",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Annuity future value formula",
+      "checks": [
+        "(1.1)^3=1.331 confirmed",
+        "(1.331-1)/0.1=3.31 confirmed",
+        "1000×3.31=3310 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 14,
+    "section": "Logical Reasoning",
+    "text": "Find the next number in the series: 2, 6, 12, 20, 30, ?",
+    "options": [
+      "42",
+      "40",
+      "44",
+      "36"
+    ],
+    "answer": 0,
+    "reasoning": "Differences are 4,6,8,10,12 (increasing by 2); next term = 30+12 = 42",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Pattern/difference analysis",
+      "checks": [
+        "Difference pattern 4,6,8,10 confirmed",
+        "Next difference 12 gives 42"
+      ]
+    }
+  },
+  {
+    "number": 15,
+    "section": "Logical Reasoning",
+    "text": "In a certain code, CAT is written as DBU. How is DOG written in that code?",
+    "options": [
+      "EPH",
+      "DPG",
+      "EPI",
+      "FQH"
+    ],
+    "answer": 0,
+    "reasoning": "Each letter is shifted forward by 1: D→E, O→P, G→H, giving EPH",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Letter-shift pattern verification",
+      "checks": [
+        "C→D, A→B, T→U confirms +1 shift rule",
+        "Applying same rule to DOG gives EPH"
+      ]
+    }
+  },
+  {
+    "number": 16,
+    "section": "Logical Reasoning",
+    "text": "Pointing to a photograph, a man said, 'She is the daughter of my grandfather's only son.' How is the woman related to the man?",
+    "options": [
+      "Sister",
+      "Daughter",
+      "Cousin",
+      "Aunt"
+    ],
+    "answer": 0,
+    "reasoning": "Grandfather's only son is the man's father; the father's daughter is the man's sister",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Relationship chain tracing",
+      "checks": [
+        "Grandfather's only son = father confirmed",
+        "Father's daughter = sister confirmed"
+      ]
+    }
+  },
+  {
+    "number": 17,
+    "section": "Logical Reasoning",
+    "text": "A man walks 5 km towards North, then turns right and walks 3 km, then turns right again and walks 5 km. How far is he from his starting point?",
+    "options": [
+      "3 km",
+      "5 km",
+      "8 km",
+      "10 km"
+    ],
+    "answer": 0,
+    "reasoning": "North and South movements (5 km each) cancel out; only the 3 km East movement remains, so distance = 3 km",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Direction vector tracing",
+      "checks": [
+        "First leg North 5km, third leg South 5km cancel",
+        "Net displacement = 3km East confirmed"
+      ]
+    }
+  },
+  {
+    "number": 18,
+    "section": "Logical Reasoning",
+    "text": "Five friends A, B, C, D and E are sitting in a row. B is to the right of A, C is to the left of A, D is to the right of B, and E is between C and A. What is their order from left to right?",
+    "options": [
+      "C, E, A, B, D",
+      "A, B, C, D, E",
+      "E, C, A, D, B",
+      "C, A, E, B, D"
+    ],
+    "answer": 0,
+    "reasoning": "From clues: C-E-A (E between C and A), then A-B (B right of A), then B-D (D right of B), giving order C, E, A, B, D",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Constraint satisfaction check",
+      "checks": [
+        "All four given conditions satisfied by sequence C,E,A,B,D",
+        "No contradictions found"
+      ]
+    }
+  },
+  {
+    "number": 19,
+    "section": "Logical Reasoning",
+    "text": "Statements: All cats are dogs. All dogs are birds.\nConclusions: I. All cats are birds. II. Some birds are cats.\nWhich conclusion(s) follow?",
+    "options": [
+      "Both I and II",
+      "Only I",
+      "Only II",
+      "Neither I nor II"
+    ],
+    "answer": 0,
+    "reasoning": "By syllogism (Barbara form), All cats are birds (I) follows; since cats are a subset of birds and cats exist, Some birds are cats (II) also follows",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Syllogism rule application",
+      "checks": [
+        "Transitive chain All A are B, All B are C gives All A are C",
+        "Conversion of universal affirmative to particular gives Some C are A"
+      ]
+    }
+  },
+  {
+    "number": 20,
+    "section": "Logical Reasoning",
+    "text": "Book is to Author as Painting is to ?",
+    "options": [
+      "Painter",
+      "Canvas",
+      "Brush",
+      "Gallery"
+    ],
+    "answer": 0,
+    "reasoning": "A Book is created by an Author, similarly a Painting is created by a Painter",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Analogy relationship check",
+      "checks": [
+        "Relationship is creator-to-creation",
+        "Painter is the creator of a painting, consistent with pattern"
+      ]
+    }
+  },
+  {
+    "number": 21,
+    "section": "Logical Reasoning",
+    "text": "Find the odd one out: Triangle, Square, Circle, Perimeter",
+    "options": [
+      "Perimeter",
+      "Triangle",
+      "Square",
+      "Circle"
+    ],
+    "answer": 0,
+    "reasoning": "Triangle, Square, and Circle are geometric shapes, while Perimeter is a measurement, not a shape",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Category classification check",
+      "checks": [
+        "Three items are shapes",
+        "Perimeter is a property/measurement, not a shape"
+      ]
+    }
+  },
+  {
+    "number": 22,
+    "section": "Statistics",
+    "text": "Find the arithmetic mean of the numbers: 10, 20, 30, 40, 50",
+    "options": [
+      "30",
+      "25",
+      "35",
+      "40"
+    ],
+    "answer": 0,
+    "reasoning": "Mean = Sum/n = (10+20+30+40+50)/5 = 150/5 = 30",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Direct mean calculation",
+      "checks": [
+        "Sum=150 confirmed",
+        "150/5=30 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 23,
+    "section": "Statistics",
+    "text": "Find the median of the data set: 5, 3, 8, 1, 9, 12, 7",
+    "options": [
+      "7",
+      "8",
+      "5",
+      "9"
+    ],
+    "answer": 0,
+    "reasoning": "Arranging in order: 1,3,5,7,8,9,12 (n=7); median is the 4th value = 7",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Sorting and middle value identification",
+      "checks": [
+        "Sorted sequence confirmed: 1,3,5,7,8,9,12",
+        "Middle (4th) term is 7"
+      ]
+    }
+  },
+  {
+    "number": 24,
+    "section": "Statistics",
+    "text": "Find the mode of the data set: 2, 3, 3, 4, 4, 4, 5, 5",
+    "options": [
+      "4",
+      "5",
+      "3",
+      "4.5"
+    ],
+    "answer": 0,
+    "reasoning": "The value 4 occurs most frequently (3 times), so mode = 4",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Frequency count check",
+      "checks": [
+        "Frequency of 4 is 3 (highest)",
+        "Frequency of 3 and 5 is 2 each"
+      ]
+    }
+  },
+  {
+    "number": 25,
+    "section": "Statistics",
+    "text": "Find the standard deviation of the data set: 2, 4, 4, 4, 5, 5, 7, 9",
+    "options": [
+      "2",
+      "4",
+      "1.5",
+      "2.5"
+    ],
+    "answer": 0,
+    "reasoning": "Mean = 40/8 = 5; deviations squared sum = 9+1+1+1+0+0+4+16 = 32; variance = 32/8 = 4; SD = √4 = 2",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Standard deviation formula computation",
+      "checks": [
+        "Sum=40, mean=5 confirmed",
+        "Sum of squared deviations = 32 confirmed",
+        "Variance=4, SD=2 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 26,
+    "section": "Statistics",
+    "text": "If Cov(X,Y) = 20, Var(X) = 25, and Var(Y) = 64, find the correlation coefficient between X and Y.",
+    "options": [
+      "0.5",
+      "0.4",
+      "0.6",
+      "0.8"
+    ],
+    "answer": 0,
+    "reasoning": "r = Cov(X,Y)/(σx × σy) = 20/(5×8) = 20/40 = 0.5",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Correlation coefficient formula",
+      "checks": [
+        "σx=√25=5, σy=√64=8 confirmed",
+        "20/40=0.5 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 27,
+    "section": "Statistics",
+    "text": "A die is thrown once. Find the probability of getting a number greater than 4.",
+    "options": [
+      "1/3",
+      "1/2",
+      "2/3",
+      "1/6"
+    ],
+    "answer": 0,
+    "reasoning": "Favorable outcomes: {5,6} = 2; Total outcomes = 6; Probability = 2/6 = 1/3",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Classical probability calculation",
+      "checks": [
+        "Favorable outcomes 5,6 counted correctly",
+        "2/6 simplifies to 1/3"
+      ]
+    }
+  },
+  {
+    "number": 28,
+    "section": "Statistics",
+    "text": "The price of an item was Rs. 50 in the base year 2015 and is Rs. 65 in 2020. Find the price index for 2020 with 2015 as base year.",
+    "options": [
+      "130",
+      "120",
+      "140",
+      "110"
+    ],
+    "answer": 0,
+    "reasoning": "Price Index = (Current year price/Base year price) × 100 = (65/50) × 100 = 130",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Price index formula computation",
+      "checks": [
+        "65/50=1.3 confirmed",
+        "1.3×100=130 confirmed"
+      ]
+    }
+  },
+  {
+    "number": 29,
+    "section": "Statistics",
+    "text": "If the regression coefficient of Y on X (byx) is 0.8 and the regression coefficient of X on Y (bxy) is 0.5, find the correlation coefficient r.",
+    "options": [
+      "0.63",
+      "0.40",
+      "0.90",
+      "0.32"
+    ],
+    "answer": 0,
+    "reasoning": "r = √(byx × bxy) = √(0.8×0.5) = √0.4 ≈ 0.63",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Geometric mean of regression coefficients",
+      "checks": [
+        "0.8×0.5=0.4 confirmed",
+        "√0.4≈0.632, rounds to 0.63"
+      ]
+    }
+  },
+  {
+    "number": 30,
+    "section": "Statistics",
+    "text": "Find the mean deviation from the mean for the data set: 4, 6, 8, 10, 12",
+    "options": [
+      "2.4",
+      "2",
+      "3",
+      "2.8"
+    ],
+    "answer": 0,
+    "reasoning": "Mean = 40/5 = 8; absolute deviations = 4,2,0,2,4; sum = 12; MD = 12/5 = 2.4",
+    "sourceType": "generated",
+    "sourceLabel": "Claude-generated; verified",
+    "verification": {
+      "status": "verified",
+      "method": "Mean deviation formula computation",
+      "checks": [
+        "Mean=8 confirmed",
+        "Sum of absolute deviations=12 confirmed",
+        "12/5=2.4 confirmed"
+      ]
+    }
+  }
+]

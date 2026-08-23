@@ -73,8 +73,9 @@ Papers 3–4 use 100 one-mark MCQs in two hours with 0.25 negative marking.
 Intermediate and Final builder levels are reserved for a later release.
 
 The Quantitative Aptitude full-format mock contains 100 MCQs: the 30 questions
-from the supplied RTP are retained as the source layer, and 70 generated
-questions are labelled with reasoning and verification checks.
+generated through the Anthropic question-setter pipeline are followed by 70
+deterministic verified questions. The API-generated set is stored as a static,
+key-free JSON asset for GitHub Pages.
 
 The builder also includes a labelled mixed bank: paraphrased ICAI past-paper and
 RTP themes, institution-neutral coaching-style prompts, and generated questions.
@@ -108,3 +109,10 @@ the computer's LAN address instead of `localhost`, for example
 - `styles.css` — all styling, including the phone and print layouts.
 - `data/` — the mock papers, parsed at runtime.
 - `assets/pdfs/` — the official ICAI source PDFs.
+
+To regenerate the 30-question Paper 3 API set locally, keep `ANTHROPIC_API_KEY`
+in `C:\Users\vvvai\.secrets\ai.env` (or set `CA_LAB_ENV`) and run:
+
+```powershell
+& 'C:\Program Files\nodejs\node.exe' scripts/generate-quantitative.mjs
+```

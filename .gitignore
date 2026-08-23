@@ -4,3 +4,5 @@ tunnel-url.txt
 tunnel.stdout.log
 tunnel.stderr.log
 foundation-test-lab-static.zip
+*.env
+.env*
