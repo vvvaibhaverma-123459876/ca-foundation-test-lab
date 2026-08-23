@@ -77,10 +77,10 @@ const EXAM_SCHEME = {
     cadence: '4 papers · 400 marks',
     source: 'https://www.icai.org/post/new-scheme-of-education-and-training',
     papers: [
-      { code: 'F1', number: 1, name: 'Accounting', group: 'Foundation', duration: 180, marks: 100, mcq: 0, descriptive: 100, negative: 0 },
-      { code: 'F2', number: 2, name: 'Business Laws', group: 'Foundation', duration: 180, marks: 100, mcq: 0, descriptive: 100, negative: 0 },
-      { code: 'F3', number: 3, name: 'Quantitative Aptitude', group: 'Foundation', duration: 120, marks: 100, mcq: 100, descriptive: 0, negative: .25, note: 'Business Mathematics, Logical Reasoning and Statistics' },
-      { code: 'F4', number: 4, name: 'Business Economics', group: 'Foundation', duration: 120, marks: 100, mcq: 100, descriptive: 0, negative: .25 }
+      { code: 'F1', number: 1, name: 'Accounting', group: 'Foundation', duration: 180, marks: 100, mcq: 0, descriptive: 100, negative: 0, formatMode: 'subjective', questionCount: 6, topLevelMarks: 20, attemptCount: 5, compulsoryCount: 1, instructions: ['Question 1 is compulsory.', 'Attempt any four questions from Questions 2 to 6.', 'Each top-level question is set at 20 marks; the candidate attempts five questions for 100 marks.'] },
+      { code: 'F2', number: 2, name: 'Business Laws', group: 'Foundation', duration: 180, marks: 100, mcq: 0, descriptive: 100, negative: 0, formatMode: 'subjective', questionCount: 6, topLevelMarks: 20, attemptCount: 5, compulsoryCount: 1, instructions: ['Question 1 is compulsory.', 'Attempt any four questions from Questions 2 to 6.', 'Each top-level question is set at 20 marks; the candidate attempts five questions for 100 marks.'] },
+      { code: 'F3', number: 3, name: 'Quantitative Aptitude', group: 'Foundation', duration: 120, marks: 100, mcq: 100, descriptive: 0, negative: .25, formatMode: 'mcq', questionCount: 100, markPerQuestion: 1, attemptCount: 100, note: 'Business Mathematics, Logical Reasoning and Statistics', instructions: ['Attempt all 100 objective questions.', 'Each question carries 1 mark.', 'A wrong answer attracts a negative mark of 0.25.'] },
+      { code: 'F4', number: 4, name: 'Business Economics', group: 'Foundation', duration: 120, marks: 100, mcq: 100, descriptive: 0, negative: .25, formatMode: 'mcq', questionCount: 100, markPerQuestion: 1, attemptCount: 100, instructions: ['Attempt all 100 objective questions.', 'Each question carries 1 mark.', 'A wrong answer attracts a negative mark of 0.25.', 'Use the current Business Economics syllabus and the applicable ICAI RTP/MTP for the session.'] }
     ]
   },
   intermediate: {
@@ -415,6 +415,11 @@ function newBuilder(levelKey = null) {
     title: '',
     duration: 180,
     totalMarks: 100,
+    formatMode: null,
+    questionCount: 0,
+    attemptCount: 0,
+    instructions: [],
+    sections: [],
     questions: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -425,20 +430,57 @@ function findSchemePaper(levelKey, paperCode) {
   return EXAM_SCHEME[levelKey]?.papers.find(paper => paper.code === paperCode) || null;
 }
 
-function questionDraft(type) {
+function questionDraft(type, overrides = {}) {
   return {
     id: makeId('question'),
     type,
     text: '',
-    marks: 1,
+    marks: type === 'mcq' ? 1 : 20,
     options: type === 'mcq' ? ['', '', '', ''] : undefined,
     answer: type === 'mcq' ? 0 : undefined,
     sourceType: 'custom',
     sourceLabel: 'Your question',
     sourceUrl: '',
     reasoning: '',
-    verification: { status: 'not-reviewed', method: '', checks: [] }
+    verification: { status: 'not-reviewed', method: '', checks: [] },
+    ...overrides
   };
+}
+
+function applyPaperFormat(builder, paper, resetQuestions = false) {
+  if (!builder || !paper) return builder;
+  builder.paperCode = paper.code;
+  builder.title = builder.title || `${paper.name} · Practice test`;
+  builder.duration = paper.duration;
+  builder.totalMarks = paper.marks;
+  builder.formatMode = paper.formatMode;
+  builder.questionCount = paper.questionCount;
+  builder.attemptCount = paper.attemptCount;
+  builder.instructions = [...(paper.instructions || [])];
+  builder.sections = [...(paper.sections || [])];
+  if (resetQuestions || !builder.questions?.length || builder.questions.length !== paper.questionCount) {
+    if (paper.formatMode === 'subjective') {
+      builder.questions = Array.from({ length: paper.questionCount }, (_, index) => questionDraft('subjective', {
+        marks: paper.topLevelMarks,
+        slot: index === 0 ? 'compulsory' : 'optional',
+        section: index === 0 ? 'Compulsory' : 'Optional'
+      }));
+    } else {
+      builder.questions = Array.from({ length: paper.questionCount }, (_, index) => {
+        const section = paper.sections?.length ? (index < paper.sections[0].count ? paper.sections[0].name : paper.sections[1].name) : '';
+        return questionDraft('mcq', { marks: paper.markPerQuestion, section });
+      });
+    }
+  } else {
+    builder.questions = builder.questions.map((question, index) => ({
+      ...question,
+      type: paper.formatMode === 'mcq' ? 'mcq' : 'subjective',
+      marks: paper.formatMode === 'mcq' ? paper.markPerQuestion : paper.topLevelMarks,
+      slot: paper.formatMode === 'subjective' ? (index === 0 ? 'compulsory' : 'optional') : undefined,
+      section: paper.formatMode === 'subjective' ? (index === 0 ? 'Compulsory' : 'Optional') : (question.section || '')
+    }));
+  }
+  return builder;
 }
 
 function cloneBankQuestion(id) {
@@ -459,12 +501,21 @@ function verifyGeneratedQuestion(question) {
 
 function validateBuilder(builder = state.builder) {
   const issues = [];
+  const paper = findSchemePaper(builder?.level, builder?.paperCode);
   if (!builder?.level || !builder.paperCode) issues.push('Choose a CA level and paper.');
   if (!builder?.title?.trim()) issues.push('Give the test a title.');
   if (!builder?.questions?.length) issues.push('Add at least one question.');
+  if (paper) {
+    if (Number(builder.duration) !== paper.duration) issues.push(`Use the official ${paper.duration}-minute duration for ${paper.name}.`);
+    if (Number(builder.totalMarks) !== paper.marks) issues.push(`Use the official ${paper.marks}-mark total for ${paper.name}.`);
+    if (builder.questions.length !== paper.questionCount) issues.push(`${paper.name} requires exactly ${paper.questionCount} questions in this format.`);
+    if (paper.formatMode === 'subjective' && builder.questions[0]?.slot !== 'compulsory') issues.push('Question 1 must remain compulsory.');
+  }
   builder?.questions?.forEach((question, index) => {
     if (!question.text?.trim()) issues.push(`Question ${index + 1} needs a prompt.`);
     if (!(Number(question.marks) > 0)) issues.push(`Question ${index + 1} needs marks greater than zero.`);
+    if (paper?.formatMode === 'subjective' && (question.type !== 'subjective' || Number(question.marks) !== paper.topLevelMarks)) issues.push(`Question ${index + 1} must be a ${paper.topLevelMarks}-mark subjective question.`);
+    if (paper?.formatMode === 'mcq' && (question.type !== 'mcq' || Number(question.marks) !== paper.markPerQuestion)) issues.push(`Question ${index + 1} must be a ${paper.markPerQuestion}-mark MCQ.`);
     if (question.type === 'mcq' && question.options.some(option => !option.trim())) issues.push(`Complete all four options for Question ${index + 1}.`);
     if (question.sourceType === 'generated') {
       const verification = verifyGeneratedQuestion(question);
@@ -751,7 +802,7 @@ function renderPaperChoice(levelKey) {
         ${level.papers.map(paper => `<button class="official-paper-card" data-action="choose-scheme-paper" data-code="${paper.code}">
           <span class="paper-code"><span>${escapeHTML(paper.group)}</span><span>Paper ${paper.number}</span></span>
           <h2>${escapeHTML(paper.name)}</h2>
-          <span class="pattern-tags"><span>${paper.duration / 60} hours</span><span>${paper.mcq}% MCQ</span><span>${paper.descriptive}% descriptive</span>${paper.negative ? `<span>−${paper.negative} wrong</span>` : '<span>No negative marking</span>'}${paper.openBook ? '<span>Open book</span>' : ''}</span>
+          <span class="pattern-tags"><span>${paper.duration / 60} hours</span><span>${paper.formatMode === 'mcq' ? `${paper.questionCount} × 1 mark` : '6 × 20-mark questions'}</span><span>${paper.formatMode === 'mcq' ? 'Attempt all' : 'Q1 compulsory + any 4'}</span>${paper.negative ? `<span>−${paper.negative} wrong</span>` : '<span>No negative marking</span>'}${paper.openBook ? '<span>Open book</span>' : ''}</span>
         </button>`).join('')}
       </div>
     </section>`;
@@ -790,20 +841,21 @@ function renderBuilderEditor() {
         </aside>
         <div class="builder-workspace">
           <section class="builder-panel">
-            <div class="builder-panel-title"><div><h2>Test details</h2><p>Official values are prefilled; shorten them for a focused practice set.</p></div></div>
+            <div class="builder-panel-title"><div><h2>Test details</h2><p>These values are fixed to the official ICAI Foundation paper format.</p></div></div>
             <div class="field-grid">
               <label class="field">Test title<input data-builder-field="title" value="${escapeHTML(builder.title)}" placeholder="e.g. Advanced Accounting · Chapter Review"></label>
-              <label class="field">Duration (minutes)<input type="number" min="1" max="360" data-builder-field="duration" value="${Number(builder.duration)}"></label>
-              <label class="field">Target marks<input type="number" min="1" max="500" data-builder-field="totalMarks" value="${Number(builder.totalMarks)}"></label>
+              <label class="field">Duration (minutes)<input type="number" readonly data-builder-field="duration" value="${Number(builder.duration)}"></label>
+              <label class="field">Target marks<input type="number" readonly data-builder-field="totalMarks" value="${Number(builder.totalMarks)}"></label>
             </div>
           </section>
+          <section class="builder-panel format-callout"><div class="builder-panel-title"><div><h2>Required paper format</h2><p>${(paper.instructions || []).map(escapeHTML).join(' ')}</p></div></div>${paper.sections?.length ? `<div class="section-pills">${paper.sections.map(section => `<span>${escapeHTML(section.name)} · ${section.count} questions</span>`).join('')}</div>` : ''}</section>
           <section class="builder-panel">
-            <div class="builder-panel-title"><div><h2>Questions</h2><p>Add selectable MCQs, handwritten subjective answers, or both.</p></div><span class="paper-chip">${builder.questions.length} total</span></div>
-            <div class="question-builder-toolbar"><p>Your current set: <b>${mcqCount} MCQ</b>, <b>${subjectiveCount} subjective</b>, <b>${questionMarks} marks</b>.</p><div class="inline-actions"><button class="button secondary small" data-action="open-question-bank">Browse mixed bank</button><button class="button secondary small" data-action="add-builder-question" data-type="mcq">+ MCQ</button><button class="button secondary small" data-action="add-builder-question" data-type="subjective">+ Subjective</button></div></div>
+            <div class="builder-panel-title"><div><h2>Questions</h2><p>${paper.formatMode === 'mcq' ? 'All 100 questions are MCQs and all are attempted.' : 'Question 1 is compulsory; Questions 2–6 are optional and the candidate attempts any four.'}</p></div><span class="paper-chip">${builder.questions.length}/${paper.questionCount}</span></div>
+            <div class="question-builder-toolbar"><p>Your current set: <b>${mcqCount} MCQ</b>, <b>${subjectiveCount} subjective</b>, <b>${questionMarks} marks composed</b>.</p><div class="inline-actions"><button class="button secondary small" data-action="open-question-bank">Browse matching bank</button></div></div>
             <div data-builder-questions>
               ${builder.questions.map((question, index) => `<article class="builder-question" data-builder-question="${index}">
-                <div class="builder-question-head"><span class="builder-question-id"><b>${index + 1}</b><span>${question.type === 'mcq' ? 'Multiple choice' : 'Subjective answer'}</span></span><button class="icon-button" data-action="remove-builder-question" data-index="${index}" aria-label="Remove Question ${index + 1}">×</button></div>
-                <div class="question-fields"><label class="field">Question prompt<textarea data-question-field="text" data-index="${index}" placeholder="Write the complete question…">${escapeHTML(question.text)}</textarea></label><label class="field">Marks<input type="number" min="1" max="100" data-question-field="marks" data-index="${index}" value="${Number(question.marks)}"></label></div>
+                <div class="builder-question-head"><span class="builder-question-id"><b>${index + 1}</b><span>${question.type === 'mcq' ? 'Multiple choice' : (index === 0 ? 'Compulsory subjective answer' : 'Optional subjective answer')}</span></span></div>
+                <div class="question-fields"><label class="field">Question prompt<textarea data-question-field="text" data-index="${index}" placeholder="Write the complete question…">${escapeHTML(question.text)}</textarea></label><label class="field">Marks<input type="number" readonly data-question-field="marks" data-index="${index}" value="${Number(question.marks)}"></label></div>
                 <div class="question-source-fields"><label class="field">Question source<select data-question-field="sourceType" data-index="${index}"><option value="custom" ${question.sourceType === 'custom' ? 'selected' : ''}>My own question</option><option value="icai" ${question.sourceType === 'icai' ? 'selected' : ''}>ICAI past paper / RTP</option><option value="coaching" ${question.sourceType === 'coaching' ? 'selected' : ''}>Coaching institution / style</option><option value="generated" ${question.sourceType === 'generated' ? 'selected' : ''}>Generated · requires verification</option></select></label><label class="field">Source label<input data-question-field="sourceLabel" data-index="${index}" value="${escapeHTML(question.sourceLabel || '')}" placeholder="e.g. ICAI May 2025 Paper 4"></label><label class="field">Source link (optional)<input data-question-field="sourceUrl" data-index="${index}" value="${escapeHTML(question.sourceUrl || '')}" placeholder="https://…"></label></div>
                 <label class="field question-reasoning">Answer reasoning / marking logic<textarea data-question-field="reasoning" data-index="${index}" placeholder="Explain why the answer is correct; generated questions require this.">${escapeHTML(question.reasoning || '')}</textarea></label>
                 ${question.type === 'mcq' ? `<div class="option-editor">${question.options.map((option, optionIndex) => `<label class="option-field"><span>${String.fromCharCode(65 + optionIndex)}</span><input data-question-option="${optionIndex}" data-index="${index}" value="${escapeHTML(option)}" placeholder="Option ${String.fromCharCode(65 + optionIndex)}"></label>`).join('')}</div><div class="correct-row"><label class="field">Correct answer<select data-question-field="answer" data-index="${index}">${[0,1,2,3].map(optionIndex => `<option value="${optionIndex}" ${Number(question.answer) === optionIndex ? 'selected' : ''}>Option ${String.fromCharCode(65 + optionIndex)}</option>`).join('')}</select></label><span class="custom-score-note">Used for automatic scoring. ${paper.negative ? `Wrong answers deduct ${paper.negative} mark.` : 'There is no negative marking for this paper.'}</span></div>` : `<p class="custom-score-note">The candidate will get a question-wise photo upload area and optional working-note field.</p>`}
@@ -908,6 +960,7 @@ function renderMcqExam() {
   const question = test.questions[state.current];
   const selected = state.session.answers[state.current];
   const hasAnswer = Object.prototype.hasOwnProperty.call(state.session.answers, state.current);
+  const isAttempted = (state.session.selectedQuestions || [0]).includes(state.current);
   const flagged = state.session.flagged.includes(state.current);
   const result = state.review ? calculateResult(test) : null;
   const sourceAssist = test.sourcePdf ? `
@@ -1243,13 +1296,15 @@ async function deletePhotosForCustomTest(testId, questions = []) {
 }
 
 function customAnswerCount(test) {
+  if (test?.formatMode === 'subjective') return (state.session?.selectedQuestions || [0]).length;
   return Object.keys(state.session?.answers || {}).length;
 }
 
 function renderCustomSidebar(test) {
   const answered = customAnswerCount(test);
-  const progress = test.questions.length ? Math.round((answered / test.questions.length) * 100) : 0;
-  return `<aside class="exam-sidebar"><button class="back-link" data-action="create-hub">← Exit test</button><span class="exam-label">${escapeHTML(test.paperName || 'Foundation')}</span><h2>${escapeHTML(test.title)}</h2><div class="timer"><span>Time left</span><strong data-timer>${formatTime(test.duration * 60)}</strong></div><div class="exam-progress"><div class="exam-progress-line"><span style="width:${progress}%"></span></div><div class="exam-progress-copy"><span>${answered} answered</span><span>${progress}%</span></div></div><div class="palette" aria-label="Question palette">${test.questions.map((question,index) => `<button class="question-dot ${Object.prototype.hasOwnProperty.call(state.session.answers,index) ? 'answered' : ''} ${state.current === index ? 'current' : ''}" data-action="custom-jump" data-index="${index}">${index + 1}</button>`).join('')}</div><div class="palette-legend"><span class="legend-row"><i class="legend-swatch done"></i> Answered</span><span class="legend-row"><i class="legend-swatch"></i> Not answered</span></div><div class="sidebar-bottom"><button class="button coral" data-action="custom-finish">Finish test</button><button class="button secondary" data-action="create-hub">Save & exit</button></div><p class="sidebar-note">MCQs score automatically. Subjective answers stay on this device for review.</p></aside>`;
+  const progress = test.questions.length ? Math.round((answered / (test.formatMode === 'subjective' ? test.attemptCount || 5 : test.questions.length)) * 100) : 0;
+  const selected = new Set(state.session.selectedQuestions || [0]);
+  return `<aside class="exam-sidebar"><button class="back-link" data-action="create-hub">← Exit test</button><span class="exam-label">${escapeHTML(test.paperName || 'Foundation')}</span><h2>${escapeHTML(test.title)}</h2><div class="timer"><span>Time left</span><strong data-timer>${formatTime(test.duration * 60)}</strong></div><div class="exam-progress"><div class="exam-progress-line"><span style="width:${Math.min(100, progress)}%"></span></div><div class="exam-progress-copy"><span>${answered} ${test.formatMode === 'subjective' ? 'selected' : 'answered'}</span><span>${test.formatMode === 'subjective' ? `of ${test.attemptCount || 5}` : `${progress}%`}</span></div></div><div class="palette" aria-label="Question palette">${test.questions.map((question,index) => `<button class="question-dot ${test.formatMode === 'subjective' ? (selected.has(index) ? 'answered' : '') : (Object.prototype.hasOwnProperty.call(state.session.answers,index) ? 'answered' : '')} ${state.current === index ? 'current' : ''}" data-action="custom-jump" data-index="${index}">${index + 1}</button>`).join('')}</div><div class="palette-legend"><span class="legend-row"><i class="legend-swatch done"></i> ${test.formatMode === 'subjective' ? 'Selected to attempt' : 'Answered'}</span><span class="legend-row"><i class="legend-swatch"></i> ${test.formatMode === 'subjective' ? 'Not selected' : 'Not answered'}</span></div><div class="sidebar-bottom"><button class="button coral" data-action="custom-finish">Finish test</button><button class="button secondary" data-action="create-hub">Save & exit</button></div><p class="sidebar-note">${test.formatMode === 'subjective' ? 'Question 1 is compulsory; choose four more questions and upload answer photos.' : 'MCQs score automatically. Wrong answers carry the official negative marking.'}</p></aside>`;
 }
 
 async function startCustomTest(id, options = {}) {
@@ -1262,11 +1317,12 @@ async function startCustomTest(id, options = {}) {
   state.review = false;
   state.session = readCustomSession(id);
   if (!state.session || state.session.completedAt || options.reset) {
-    state.session = { answers: {}, notes: {}, startedAt: Date.now(), duration: test.duration, completedAt: null };
+    state.session = { answers: {}, notes: {}, selectedQuestions: test.formatMode === 'subjective' ? [0] : [], startedAt: Date.now(), duration: test.duration, completedAt: null };
     writeCustomSession();
   } else {
     state.session.answers ||= {};
     state.session.notes ||= {};
+    state.session.selectedQuestions ||= test.formatMode === 'subjective' ? [0] : [];
     state.session.duration ||= test.duration;
   }
   renderCustomExam();
@@ -1285,8 +1341,8 @@ function renderCustomExam() {
   const reasoning = question.reasoning?.trim() ? `<details class="custom-rationale"><summary>${question.sourceType === 'generated' ? 'Verified reasoning' : 'Answer reasoning'}</summary><p>${escapeHTML(question.reasoning)}</p>${question.verification?.checks?.length ? `<small>${escapeHTML(question.verification.checks.join(' · '))}</small>` : ''}</details>` : '';
   const body = question.type === 'mcq'
     ? `<div class="options" role="radiogroup" aria-label="Answer options">${question.options.map((option,index) => `<button class="option ${selected === index ? 'selected' : ''}" data-action="custom-select-option" data-index="${index}" role="radio" aria-checked="${selected === index}"><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`).join('')}</div><p class="custom-score-note">Select one answer. ${test.negative ? `Wrong answers deduct ${test.negative} mark.` : 'There is no negative marking for this paper.'}</p>`
-    : `<section class="answer-desk"><div class="answer-desk-head"><div><h4>Your answer sheet</h4><p>Write your answer on paper, then add one or more clear photos.</p></div><label class="button small upload-button">Add photos<input type="file" accept="image/*" capture="environment" multiple data-custom-photo-input="${question.id}" aria-label="Add answer photos"></label></div><div class="photo-grid" data-custom-photo-grid="${question.id}"><div class="empty-uploads">Loading saved answer photos…</div></div><textarea class="answer-note" data-custom-note="${question.id}" placeholder="Optional note: assumptions, workings, or what to improve…">${escapeHTML(state.session.notes[question.id] || '')}</textarea></section>`;
-  app.innerHTML = `<section class="exam-shell">${renderCustomSidebar(test)}<main class="exam-main"><div class="exam-main-inner"><div class="question-meta"><strong>${escapeHTML(test.paperName || 'Foundation paper')}</strong><span>Question ${state.current + 1} of ${test.questions.length} · ${question.marks} marks</span></div><article class="question-card"><span class="question-number">${state.current + 1}</span>${sourceMeta}<h1 class="question-text">${escapeHTML(question.text)}</h1>${body}${reasoning}</article><div class="exam-controls"><div class="exam-controls-group"><button class="button secondary small" data-action="custom-previous" ${state.current === 0 ? 'disabled' : ''}>← Previous</button></div><button class="button small" data-action="custom-next" ${state.current === test.questions.length - 1 ? 'disabled' : ''}>Next question →</button></div></div></main></section>`;
+    : `<div><button class="button ${isAttempted ? 'coral' : 'secondary'} small" data-action="custom-toggle-attempt" data-index="${state.current}">${isAttempted ? 'Selected to attempt' : 'Select this question'}</button><section class="answer-desk"><div class="answer-desk-head"><div><h4>Your answer sheet</h4><p>Write your answer on paper, then add one or more clear photos.</p></div><label class="button small upload-button">Add photos<input type="file" accept="image/*" capture="environment" multiple data-custom-photo-input="${question.id}" aria-label="Add answer photos"></label></div><div class="photo-grid" data-custom-photo-grid="${question.id}"><div class="empty-uploads">Loading saved answer photos…</div></div><textarea class="answer-note" data-custom-note="${question.id}" placeholder="Optional note: assumptions, workings, or what to improve…">${escapeHTML(state.session.notes[question.id] || '')}</textarea></section></div>`;
+  app.innerHTML = `<section class="exam-shell">${renderCustomSidebar(test)}<main class="exam-main"><div class="exam-main-inner"><div class="question-meta"><strong>${escapeHTML(test.paperName || 'Foundation paper')}</strong><span>Question ${state.current + 1} of ${test.questions.length} · ${question.marks} marks${test.formatMode === 'subjective' ? (state.current === 0 ? ' · Compulsory' : ' · Optional') : ''}</span></div><article class="question-card"><span class="question-number">${state.current + 1}</span>${sourceMeta}<h1 class="question-text">${escapeHTML(question.text)}</h1>${body}${reasoning}</article><div class="exam-controls"><div class="exam-controls-group"><button class="button secondary small" data-action="custom-previous" ${state.current === 0 ? 'disabled' : ''}>← Previous</button></div><button class="button small" data-action="custom-next" ${state.current === test.questions.length - 1 ? 'disabled' : ''}>Next question →</button></div></div></main></section>`;
   if (question.type === 'subjective') hydrateCustomPhotoGrid(test.id, question.id).catch(() => {});
   startCountdown(test.duration * 60, state.session.startedAt, () => { toast('Time is up. Your saved work is still available.'); openCustomFinishModal(true); });
   window.scrollTo({ top: 0 });
@@ -1296,7 +1352,8 @@ async function openCustomFinishModal(timeExpired = false) {
   const test = state.customTest;
   const answered = customAnswerCount(test);
   const photos = await countCustomPhotos(test.id, test.questions.filter(question => question.type === 'subjective'));
-  openModal(`<h2>${timeExpired ? 'Time is up.' : 'Finish this test?'}</h2><p>You answered <b>${answered}</b> of ${test.questions.length} questions and saved <b>${photos}</b> subjective answer photo${photos === 1 ? '' : 's'}.</p><p>MCQs will be scored now; subjective responses remain marked for manual review.</p><div class="inline-actions"><button class="button coral" data-action="confirm-custom">Finish & score</button><button class="button secondary" data-action="close-modal">Keep working</button></div>`);
+  const formatWarning = test.formatMode === 'subjective' && answered !== (test.attemptCount || 5) ? `<p class="validation-list">Select Question 1 and exactly four of Questions 2–6 before finishing.</p>` : '';
+  openModal(`<h2>${timeExpired ? 'Time is up.' : 'Finish this test?'}</h2><p>${test.formatMode === 'subjective' ? `You selected <b>${answered}</b> of ${test.attemptCount || 5} required questions` : `You answered <b>${answered}</b> of ${test.questions.length} questions`} and saved <b>${photos}</b> subjective answer photo${photos === 1 ? '' : 's'}.</p><p>${test.formatMode === 'subjective' ? 'Selected subjective responses remain marked for manual review.' : 'MCQs will be scored with the official negative marking.'}</p>${formatWarning}<div class="inline-actions"><button class="button coral" data-action="confirm-custom" ${formatWarning ? 'disabled' : ''}>Finish & score</button><button class="button secondary" data-action="close-modal">Keep working</button></div>`);
 }
 
 function calculateCustomResult(test) {
@@ -1367,10 +1424,7 @@ document.addEventListener('click', async event => {
   if (action === 'choose-scheme-paper') {
     const paper = findSchemePaper(state.builder?.level || 'foundation', control.dataset.code);
     if (!paper || !state.builder) return renderCreateHub();
-    state.builder.paperCode = paper.code;
-    state.builder.title = state.builder.title || `${paper.name} · Practice test`;
-    state.builder.duration = paper.duration;
-    state.builder.totalMarks = paper.marks;
+    applyPaperFormat(state.builder, paper, true);
     return renderBuilderEditor();
   }
   if (action === 'change-builder-paper') return renderPaperChoice(state.builder?.level || 'foundation');
@@ -1378,18 +1432,17 @@ document.addEventListener('click', async event => {
   if (action === 'add-bank-question') {
     const question = cloneBankQuestion(control.dataset.bankId);
     if (!question || !state.builder) return;
-    state.builder.questions.push(question);
+    const slot = state.builder.questions.findIndex(item => item.type === question.type && !item.text?.trim());
+    if (slot >= 0) state.builder.questions[slot] = { ...state.builder.questions[slot], ...question, id: state.builder.questions[slot].id, marks: state.builder.questions[slot].marks, slot: state.builder.questions[slot].slot, section: state.builder.questions[slot].section };
+    else toast('All matching question slots are already filled.');
     closeModal();
     return renderBuilderEditor();
   }
   if (action === 'add-builder-question') {
-    if (!state.builder) return renderCreateHub();
-    state.builder.questions.push(questionDraft(control.dataset.type === 'subjective' ? 'subjective' : 'mcq'));
-    return renderBuilderEditor();
+    return toast('Question count is fixed by the official Foundation paper format.');
   }
   if (action === 'remove-builder-question') {
-    state.builder?.questions.splice(Number(control.dataset.index), 1);
-    return renderBuilderEditor();
+    return toast('Question count is fixed by the official Foundation paper format.');
   }
   if (action === 'save-custom-test') {
     if (!state.builder) return renderCreateHub();
@@ -1397,7 +1450,7 @@ document.addEventListener('click', async event => {
     const issues = validateBuilder(state.builder);
     if (issues.length) return renderBuilderEditor();
     const paper = findSchemePaper(state.builder.level, state.builder.paperCode);
-    const snapshot = { ...state.builder, title: state.builder.title.trim(), duration: Number(state.builder.duration), totalMarks: Number(state.builder.totalMarks), paperName: paper.name, negative: paper.negative, pattern: { mcq: paper.mcq, descriptive: paper.descriptive }, openBook: Boolean(paper.openBook), updatedAt: Date.now() };
+    const snapshot = { ...state.builder, title: state.builder.title.trim(), duration: Number(state.builder.duration), totalMarks: Number(state.builder.totalMarks), paperName: paper.name, negative: paper.negative, formatMode: paper.formatMode, questionCount: paper.questionCount, attemptCount: paper.attemptCount, compulsoryCount: paper.compulsoryCount || 0, instructions: paper.instructions || [], sections: paper.sections || [], pattern: { mcq: paper.mcq, descriptive: paper.descriptive }, openBook: Boolean(paper.openBook), updatedAt: Date.now() };
     delete snapshot.showErrors;
     saveCustomTest(snapshot);
     state.builder = null;
@@ -1408,6 +1461,7 @@ document.addEventListener('click', async event => {
     const test = getCustomTest(control.dataset.id);
     if (!test) return toast('That custom test no longer exists.');
     state.builder = JSON.parse(JSON.stringify(test));
+    applyPaperFormat(state.builder, findSchemePaper(state.builder.level, state.builder.paperCode), false);
     state.builder.showErrors = false;
     state.builder.editing = true;
     return renderBuilderEditor();
@@ -1444,6 +1498,18 @@ document.addEventListener('click', async event => {
     const question = test?.questions[state.current];
     if (!test || !question || question.type !== 'mcq') return;
     state.session.answers[state.current] = Number(control.dataset.index);
+    writeCustomSession();
+    return renderCustomExam();
+  }
+  if (action === 'custom-toggle-attempt') {
+    const test = state.customTest;
+    const index = Number(control.dataset.index);
+    if (!test || test.formatMode !== 'subjective' || index === 0) return;
+    const selected = new Set(state.session.selectedQuestions || [0]);
+    if (selected.has(index)) selected.delete(index);
+    else if (selected.size < (test.attemptCount || 5)) selected.add(index);
+    else return toast(`Select only ${test.attemptCount || 5} questions, including compulsory Question 1.`);
+    state.session.selectedQuestions = [...selected].sort((a, b) => a - b);
     writeCustomSession();
     return renderCustomExam();
   }

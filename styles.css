@@ -525,6 +525,10 @@ table.data th { background: #edf1eb; }
 .question-builder-toolbar { display: flex; justify-content: space-between; gap: 14px; align-items: center; border: 1px dashed rgba(24,52,47,.2); border-radius: 15px; padding: 14px; }
 .question-builder-toolbar p { margin: 0; color: var(--muted); font-size: .76rem; }
 .question-builder-toolbar .inline-actions { flex: 0 0 auto; }
+.format-callout { background: linear-gradient(135deg, rgba(255,247,235,.95), rgba(244,250,246,.95)); border-color: rgba(197,133,56,.28); }
+.format-callout p { max-width: 760px; }
+.section-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.section-pills span { border: 1px solid rgba(24,52,47,.14); border-radius: 999px; padding: 7px 10px; color: var(--ink); font-size: .72rem; background: rgba(255,255,255,.6); }
 .builder-question { margin-top: 11px; border: 1px solid var(--line); border-radius: 15px; padding: 16px; background: #fbfcf9; }
 .builder-question-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 13px; }
 .builder-question-id { display: flex; align-items: center; gap: 9px; }
