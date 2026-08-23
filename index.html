@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173a34">
+  <meta name="description" content="An interactive CA Foundation practice environment for Accounting, Business Laws, Quantitative Aptitude and Business Economics.">
+  <title>Foundation Test Lab</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#app">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="#home" aria-label="Foundation Test Lab home">
+      <span class="brand-mark" aria-hidden="true">F</span>
+      <span class="brand-copy"><b>Foundation</b><small>Test Lab</small></span>
+    </a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="#home" data-nav="home">Practice</a>
+      <a href="#create" data-nav="create">Create test</a>
+      <a href="#library" data-nav="library">Source library</a>
+    </nav>
+    <div class="header-status"><span class="status-dot" aria-hidden="true"></span> Saved on this device</div>
+  </header>
+
+  <main id="app" tabindex="-1" aria-live="polite"></main>
+
+  <footer class="site-footer">
+    <span>Foundation Test Lab</span>
+    <span>Private, local practice workspace</span>
+  </footer>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <button class="icon-button modal-close" type="button" aria-label="Close dialog">×</button>
+      <div id="modal-content"></div>
+    </section>
+  </div>
+
+  <noscript>
+    <div class="noscript">This practice lab needs JavaScript enabled to save answers and run tests.</div>
+  </noscript>
+  <script src="app.js" defer></script>
+</body>
+</html>
