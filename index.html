@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#173a34">
   <meta name="description" content="An interactive CA Foundation practice environment for Accounting, Business Laws, Quantitative Aptitude and Business Economics.">
   <title>Foundation Test Lab</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23173a34'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='38' font-weight='700' fill='%23f4b942' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -18,18 +19,21 @@
     <nav class="main-nav" aria-label="Main navigation">
       <a href="#home" data-nav="home">Practice</a>
       <a href="#create" data-nav="create">Create test</a>
+      <a href="#frenzy" data-nav="frenzy">Frenzy</a>
       <a href="#library" data-nav="library">Source library</a>
+      <a href="#help" data-nav="help">Help</a>
     </nav>
     <div class="header-status"><span class="status-dot" aria-hidden="true"></span> Saved on this device</div>
   </header>
 
-  <main id="app" tabindex="-1" aria-live="polite"></main>
+  <main id="app" tabindex="-1"></main>
 
   <footer class="site-footer">
     <span>Foundation Test Lab</span>
     <span>Private, local practice workspace</span>
   </footer>
 
+  <p class="sr-only" id="live-region" role="status" aria-live="polite" aria-atomic="true"></p>
   <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
   <div class="modal-backdrop" id="modal-backdrop" hidden>
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
