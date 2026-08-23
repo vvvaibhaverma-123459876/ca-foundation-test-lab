@@ -2,6 +2,7 @@ const app = document.querySelector('#app');
 const modalBackdrop = document.querySelector('#modal-backdrop');
 const modalContent = document.querySelector('#modal-content');
 const toastRegion = document.querySelector('#toast-region');
+const liveRegion = document.querySelector('#live-region');
 
 const ARTIFACTS = {
   accounting: {
@@ -341,6 +342,8 @@ const OFFICIAL_TESTS = {
 const cache = new Map();
 const state = {
   timer: null,
+  timerDuration: 0,
+  lastFocus: null,
   subject: null,
   paper: 1,
   current: 0,
@@ -367,29 +370,76 @@ function formatTime(seconds) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+// Anything worth saying out loud goes through here so screen-reader and
+// keyboard users hear the same feedback sighted users see in a toast.
+function announce(message) {
+  if (!liveRegion) return;
+  liveRegion.textContent = '';
+  window.setTimeout(() => { liveRegion.textContent = message; }, 60);
+}
+
 function toast(message) {
   const item = document.createElement('div');
   item.className = 'toast';
   item.textContent = message;
   toastRegion.append(item);
-  window.setTimeout(() => item.remove(), 3200);
+  window.setTimeout(() => item.remove(), 4200);
+  announce(message);
 }
 
+// Every screen ends by handing focus to its own heading, so a keyboard or
+// screen-reader user lands on the new page instead of the top of the document.
+function finishRender() {
+  window.scrollTo({ top: 0 });
+  const target = app.querySelector('h1') || app;
+  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  try { target.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 function openModal(html) {
+  if (modalBackdrop.hidden) state.lastFocus = document.activeElement;
   modalContent.innerHTML = html;
   modalBackdrop.hidden = false;
   document.body.style.overflow = 'hidden';
-  modalBackdrop.querySelector('.modal-close').focus();
+  const first = modalContent.querySelector(FOCUSABLE) || modalBackdrop.querySelector('.modal-close');
+  first?.focus();
 }
 
 function closeModal() {
+  const wasOpen = !modalBackdrop.hidden;
   modalBackdrop.hidden = true;
   modalContent.innerHTML = '';
   document.body.style.overflow = '';
+  if (wasOpen && state.lastFocus?.isConnected) {
+    try { state.lastFocus.focus({ preventScroll: true }); } catch { /* best effort */ }
+  }
+  state.lastFocus = null;
+}
+
+// Keep Tab inside an open dialog instead of letting it wander into the page behind.
+function trapModalFocus(event) {
+  if (modalBackdrop.hidden || event.key !== 'Tab') return;
+  const items = [...modalBackdrop.querySelectorAll(FOCUSABLE)].filter(item => item.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+
+function saveActiveSession() {
+  if (!state.session) return;
+  if (state.customTest) writeCustomSession();
+  else if (state.subject) writeSession();
 }
 
 function stopTimer() {
-  if (state.timer) window.clearInterval(state.timer);
+  if (state.timer) {
+    window.clearInterval(state.timer);
+    if (!state.review) saveActiveSession();
+  }
   state.timer = null;
 }
 
@@ -604,19 +654,111 @@ function validateBuilder(builder = state.builder) {
   return issues;
 }
 
-function startCountdown(duration, startedAt, onExpire) {
+// The exam clock measures time actually spent on the paper, not wall-clock time
+// since it was opened. Closing the tab, locking the phone, or coming back the
+// next morning no longer burns the clock or force-submits a half-finished paper.
+function normaliseTiming(session, duration) {
+  if (!session) return session;
+  session.duration ||= duration;
+  if (typeof session.elapsed !== 'number' || !Number.isFinite(session.elapsed)) session.elapsed = 0;
+  session.elapsed = Math.max(0, Math.min(duration, Math.floor(session.elapsed)));
+  if (typeof session.paused !== 'boolean') session.paused = false;
+  return session;
+}
+
+function remainingSeconds(duration) {
+  return Math.max(0, duration - Math.floor(state.session?.elapsed || 0));
+}
+
+function paintTimer(duration) {
+  const remaining = remainingSeconds(duration);
+  const paused = Boolean(state.session?.paused) && !state.review;
+  const output = document.querySelector('[data-timer]');
+  if (output) {
+    output.textContent = state.review ? '\u2014' : formatTime(remaining);
+    const box = output.closest('.timer');
+    if (box) {
+      box.classList.toggle('is-paused', paused);
+      box.classList.toggle('is-low', !paused && !state.review && remaining <= 300);
+    }
+  }
+  document.querySelectorAll('[data-timer-label]').forEach(node => {
+    node.textContent = state.review ? 'Review mode' : paused ? 'Paused' : 'Time left';
+  });
+  document.querySelectorAll('[data-action="toggle-pause"]').forEach(button => {
+    const short = button.hasAttribute('data-compact');
+    button.textContent = paused ? (short ? 'Resume' : 'Resume paper') : (short ? 'Pause' : 'Pause paper');
+    button.setAttribute('aria-label', paused ? 'Resume the paper and restart the clock' : 'Pause the paper and stop the clock');
+    button.setAttribute('aria-pressed', paused ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-quick-time]').forEach(node => {
+    node.textContent = state.review ? 'Review' : paused ? 'Paused' : formatTime(remaining);
+  });
+}
+
+function startCountdown(duration, onExpire) {
   stopTimer();
-  const update = () => {
-    const remaining = duration - Math.floor((Date.now() - startedAt) / 1000);
-    const output = document.querySelector('[data-timer]');
-    if (output) output.textContent = formatTime(remaining);
+  if (!state.session) return;
+  normaliseTiming(state.session, duration);
+  state.timerDuration = duration;
+  state.expiry = onExpire;
+  let unsaved = 0;
+  const tick = () => {
+    if (state.review || !state.session) return;
+    // A hidden tab is a student who stepped away. Their clock waits for them.
+    if (state.session.paused || document.hidden) return;
+    state.session.elapsed = Math.min(duration, Math.floor(state.session.elapsed) + 1);
+    unsaved += 1;
+    const remaining = remainingSeconds(duration);
+    if (remaining <= 300 && remaining > 0 && !state.session.warnedLowTime) {
+      state.session.warnedLowTime = true;
+      unsaved = 5;
+      toast('5 minutes left on this paper.');
+    }
+    if (unsaved >= 5) { saveActiveSession(); unsaved = 0; }
+    paintTimer(duration);
     if (remaining <= 0) {
       stopTimer();
       onExpire?.();
     }
   };
-  update();
-  state.timer = window.setInterval(update, 1000);
+  paintTimer(duration);
+  state.timer = window.setInterval(tick, 1000);
+}
+
+// Pausing hides the questions as well as stopping the clock, so a break is a
+// real break rather than free reading time.
+function togglePause() {
+  if (!state.session || state.review) return;
+  state.session.paused = !state.session.paused;
+  saveActiveSession();
+  paintTimer(state.timerDuration || 0);
+  renderPauseOverlay();
+  announce(state.session.paused ? 'Paper paused. The clock has stopped and your answers are saved.' : 'Paper resumed.');
+}
+
+function renderPauseOverlay() {
+  const existing = document.querySelector('#pause-overlay');
+  if (!state.session?.paused || state.review || !document.body.classList.contains('exam-active')) {
+    existing?.remove();
+    document.body.classList.remove('exam-paused');
+    return;
+  }
+  document.body.classList.add('exam-paused');
+  if (existing) { existing.querySelector('button')?.focus(); return; }
+  const node = document.createElement('div');
+  node.id = 'pause-overlay';
+  node.innerHTML = `<div class="pause-card" role="dialog" aria-modal="true" aria-label="Paper paused">
+    <span class="pause-mark" aria-hidden="true">II</span>
+    <h2>Paper paused</h2>
+    <p>The clock has stopped and every answer so far is saved. Take the break you need &mdash; nothing is lost while you are away, and you can even close this tab.</p>
+    <div class="pause-actions">
+      <button class="button coral" data-action="toggle-pause">Resume paper</button>
+      <button class="button secondary" data-action="back-papers">Save &amp; exit</button>
+    </div>
+  </div>`;
+  document.body.append(node);
+  node.querySelector('button')?.focus();
 }
 
 function sanitizeHTML(html) {
@@ -721,6 +863,289 @@ function renderError(error) {
   app.innerHTML = `<section class="page-shell section"><div class="empty-state"><h2>That paper could not be opened.</h2><p>${escapeHTML(error.message)}</p><button class="button" data-action="home">Back to practice</button></div></section>`;
 }
 
+// ---------------------------------------------------------------------------
+// Unfinished papers. Someone revising in short bursts should land on the home
+// page and be one tap from the paper they were halfway through, instead of
+// retracing the route that got them there.
+// ---------------------------------------------------------------------------
+const MOCK_SUBJECTS = ['accounting', 'laws', 'economics'];
+
+function describeElapsed(timestamp) {
+  if (!timestamp) return 'Started earlier';
+  const minutes = Math.floor((Date.now() - timestamp) / 60000);
+  if (minutes < 1) return 'Started just now';
+  if (minutes < 60) return `Started ${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Started ${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'Started yesterday' : `Started ${days} days ago`;
+}
+
+function unfinishedPapers() {
+  const rows = [];
+  MOCK_SUBJECTS.forEach(subject => {
+    const config = ARTIFACTS[subject];
+    for (let paper = 1; paper <= 10; paper += 1) {
+      const session = readSession(subject, paper);
+      if (!session || session.completedAt) continue;
+      const done = config.kind === 'mcq'
+        ? Object.keys(session.answers || {}).length
+        : (session.selectedQuestions || []).length;
+      if (!done && !Object.keys(session.notes || {}).length) continue;
+      rows.push({
+        href: `#${config.kind === 'mcq' ? 'exam' : 'subjective'}/${subject}/${paper}`,
+        title: `${config.title} · Mock ${paper}`,
+        meta: config.kind === 'mcq' ? `${done} question${done === 1 ? '' : 's'} answered` : `${done} question${done === 1 ? '' : 's'} selected`,
+        duration: session.duration || config.duration,
+        session
+      });
+    }
+  });
+  Object.values(OFFICIAL_TESTS).forEach(test => {
+    const session = readSession(test.id, 1);
+    if (!session || session.completedAt) return;
+    const done = Object.keys(session.answers || {}).length;
+    if (!done) return;
+    rows.push({
+      href: `#exam/${test.id}/1`,
+      title: test.title,
+      meta: `${done} question${done === 1 ? '' : 's'} answered`,
+      duration: session.duration || test.duration,
+      session
+    });
+  });
+  readCustomTests().forEach(test => {
+    const session = readCustomSession(test.id);
+    if (!session || session.completedAt) return;
+    const done = test.formatMode === 'subjective'
+      ? (session.selectedQuestions || []).length
+      : Object.keys(session.answers || {}).length;
+    if (!done) return;
+    rows.push({
+      href: `#custom/${test.id}`,
+      title: test.title,
+      meta: `${done} of ${test.questions.length} done`,
+      duration: (session.duration || test.duration) * 60,
+      session
+    });
+  });
+  return rows.sort((a, b) => (b.session.startedAt || 0) - (a.session.startedAt || 0));
+}
+
+function resumePanel() {
+  const rows = unfinishedPapers();
+  if (!rows.length) return '';
+  return `
+    <section class="section resume-section">
+      <div class="page-shell">
+        <div class="section-heading"><div><p class="eyebrow">Pick up where you stopped</p><h2>${rows.length === 1 ? 'One paper is still open.' : `${rows.length} papers are still open.`}</h2><p>Your answers and your remaining time were both saved. Nothing expired while you were away.</p></div></div>
+        <div class="resume-grid">
+          ${rows.slice(0, 4).map(row => {
+            const left = Math.max(0, (row.duration || 0) - Math.floor(row.session.elapsed || 0));
+            return `<a class="resume-card" href="${row.href}">
+              <span class="resume-flag">${row.session.paused ? 'Paused' : 'In progress'}</span>
+              <h3>${escapeHTML(row.title)}</h3>
+              <p>${escapeHTML(row.meta)} · ${escapeHTML(describeElapsed(row.session.startedAt))}</p>
+              <span class="resume-foot"><b>${formatTime(left)}</b> left on the clock <i aria-hidden="true">&rarr;</i></span>
+            </a>`;
+          }).join('')}
+        </div>
+      </div>
+    </section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Backup and restore. Everything lives in this browser, which is private but
+// also fragile: clearing browsing data, switching phones, or using a different
+// browser loses months of work. One button writes it all to a file.
+// ---------------------------------------------------------------------------
+const BACKUP_VERSION = 1;
+const PHOTO_BUDGET = 250 * 1024 * 1024;
+
+function labStorageEntries() {
+  const entries = {};
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith('foundation-test-lab:')) entries[key] = localStorage.getItem(key);
+  }
+  return entries;
+}
+
+async function allPhotos() {
+  const db = await openPhotoDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('photos', 'readonly').objectStore('photos').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, encoded] = String(dataUrl).split(',');
+  const type = /:(.*?);/.exec(header)?.[1] || 'image/jpeg';
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type });
+}
+
+function downloadFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function backupSummary() {
+  let photos = [];
+  try { photos = await allPhotos(); } catch { photos = []; }
+  const bytes = photos.reduce((sum, photo) => sum + (photo.blob?.size || 0), 0);
+  const attempts = Object.keys(labStorageEntries()).filter(key => key !== CUSTOM_TESTS_KEY).length;
+  return { photoCount: photos.length, photoBytes: bytes, attempts, customTests: readCustomTests().length };
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function downloadBackup(includePhotos) {
+  toast('Preparing your backup file…');
+  const payload = { app: 'foundation-test-lab', version: BACKUP_VERSION, savedAt: new Date().toISOString(), storage: labStorageEntries(), photos: [] };
+  if (includePhotos) {
+    try {
+      const photos = await allPhotos();
+      for (const photo of photos) {
+        payload.photos.push({ id: photo.id, scope: photo.scope, name: photo.name, type: photo.type, size: photo.size, createdAt: photo.createdAt, dataUrl: await blobToDataUrl(photo.blob) });
+      }
+    } catch {
+      toast('Answer photos could not be read, so the backup holds your answers and notes only.');
+    }
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadFile(new Blob([JSON.stringify(payload)], { type: 'application/json' }), `foundation-test-lab-backup-${stamp}.json`);
+  toast('Backup saved to your downloads folder.');
+}
+
+async function restoreBackup(file) {
+  const text = await file.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw new Error('That file is not a Foundation Test Lab backup.'); }
+  if (payload?.app !== 'foundation-test-lab' || !payload.storage) throw new Error('That file is not a Foundation Test Lab backup.');
+  Object.entries(payload.storage).forEach(([key, value]) => {
+    if (key.startsWith('foundation-test-lab:')) localStorage.setItem(key, value);
+  });
+  let restoredPhotos = 0;
+  if (Array.isArray(payload.photos) && payload.photos.length) {
+    const db = await openPhotoDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction('photos', 'readwrite');
+      const store = transaction.objectStore('photos');
+      payload.photos.forEach(photo => {
+        if (!photo?.dataUrl) return;
+        const blob = dataUrlToBlob(photo.dataUrl);
+        store.put({ id: photo.id, scope: photo.scope, name: photo.name, type: photo.type || blob.type, size: photo.size || blob.size, createdAt: photo.createdAt, blob });
+        restoredPhotos += 1;
+      });
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+  return { attempts: Object.keys(payload.storage).length, photos: restoredPhotos };
+}
+
+function renderHelp() {
+  stopTimer();
+  document.body.classList.remove('exam-active');
+  activateNav('help');
+  app.innerHTML = `
+    <section class="page-shell help-page">
+      <div class="help-head">
+        <div><p class="eyebrow">Help</p><h1>Everything you need,<br>in plain words.</h1><p>No setup, no account, no internet needed once the page has opened. Pick a paper, answer it, and the lab keeps your work safe on this device.</p></div>
+      </div>
+
+      <div class="help-grid">
+        <article class="help-card">
+          <span class="help-step">1</span>
+          <h2>Start a paper</h2>
+          <p>On <a href="#home">Practice</a>, tap any subject card. Papers 1 and 2 are written on paper and photographed. Papers 3 and 4 are multiple choice and are marked for you the moment you submit.</p>
+        </article>
+        <article class="help-card">
+          <span class="help-step">2</span>
+          <h2>Stop whenever you need to</h2>
+          <p>The clock only runs while the paper is open in front of you. Close the tab, take a call, sleep on it — your remaining time is exactly where you left it. Use <b>Pause paper</b> for a deliberate break; it stops the clock and covers the questions.</p>
+        </article>
+        <article class="help-card">
+          <span class="help-step">3</span>
+          <h2>Come back in one tap</h2>
+          <p>Any unfinished paper appears at the top of <a href="#home">Practice</a> under <b>Pick up where you stopped</b>, with the time still on its clock. You never have to remember which mock you were on.</p>
+        </article>
+        <article class="help-card">
+          <span class="help-step">4</span>
+          <h2>Answer faster</h2>
+          <p>On a keyboard, press <kbd>A</kbd>&ndash;<kbd>D</kbd> to choose an answer and <kbd>&rarr;</kbd> for the next question. <button class="link-button" data-action="shortcut-help">See the full list</button>. On a phone, the bar at the bottom of a paper holds the question grid, pause, and submit.</p>
+        </article>
+      </div>
+
+      <section class="help-panel">
+        <h2>Where your work is kept</h2>
+        <p>Answers, notes, custom tests, and answer photos are stored inside this browser on this device. They are never uploaded anywhere, which keeps them private &mdash; but it also means they are only as safe as this browser. They disappear if you clear your browsing data, use a different browser or phone, or open the site in a private window.</p>
+        <p><b>So make a backup file now and then.</b> It saves everything into one file you can keep in your email or cloud drive, and restore on any device.</p>
+        <div class="backup-box" data-backup-box>
+          <p class="backup-summary" data-backup-summary>Checking what is saved…</p>
+          <div class="inline-actions">
+            <button class="button coral" data-action="backup-download">Save a backup file</button>
+            <label class="button secondary restore-button">Restore from a backup<input type="file" accept="application/json,.json" data-restore-input aria-label="Choose a Foundation Test Lab backup file to restore"></label>
+          </div>
+          <p class="backup-note">Restoring adds the papers from the file back into this browser. Work already here with the same paper number is replaced by the version in the file.</p>
+        </div>
+      </section>
+
+      <section class="help-panel">
+        <h2>If something looks wrong</h2>
+        <dl class="faq-list">
+          <div><dt>The page is blank or a paper will not open.</dt><dd>Reload the page. Your saved answers are not affected by a reload.</dd></div>
+          <div><dt>I am on a different phone or laptop.</dt><dd>Your work does not travel by itself. Save a backup file on the old device and restore it on the new one.</dd></div>
+          <div><dt>A photo will not upload.</dt><dd>Each photo must be an image under 20 MB. If the device is low on storage, free some space and try again.</dd></div>
+          <div><dt>I finished a paper by mistake.</dt><dd>Open the result and choose <b>Reopen attempt</b> for a written paper. For an MCQ paper, <b>Review answers</b> shows everything you chose alongside the correct answer.</dd></div>
+          <div><dt>Can I use this offline?</dt><dd>Yes, once the page has loaded. Opening the official PDFs in the source library is the only part that needs the page to be reachable.</dd></div>
+        </dl>
+      </section>
+    </section>`;
+  refreshBackupSummary();
+  finishRender();
+}
+
+async function refreshBackupSummary() {
+  const node = document.querySelector('[data-backup-summary]');
+  if (!node) return;
+  try {
+    const summary = await backupSummary();
+    const parts = [`${summary.attempts} saved paper${summary.attempts === 1 ? '' : 's'}`];
+    if (summary.customTests) parts.push(`${summary.customTests} custom test${summary.customTests === 1 ? '' : 's'}`);
+    parts.push(summary.photoCount ? `${summary.photoCount} answer photo${summary.photoCount === 1 ? '' : 's'} (${formatBytes(summary.photoBytes)})` : 'no answer photos yet');
+    node.textContent = `Saved in this browser right now: ${parts.join(', ')}.`;
+    node.dataset.photoBytes = String(summary.photoBytes);
+    node.dataset.photoCount = String(summary.photoCount);
+  } catch {
+    node.textContent = 'Your answers and notes are saved in this browser.';
+  }
+}
+
 function renderHome() {
   stopTimer();
   document.body.classList.remove('exam-active');
@@ -754,6 +1179,8 @@ function renderHome() {
         </div>
       </div>
     </section>
+
+    ${resumePanel()}
 
     <section class="section alt">
       <div class="page-shell">
@@ -805,7 +1232,7 @@ function renderHome() {
         <div class="journey-line" aria-label="Chartered Accountancy exam journey"><span>Foundation</span><i></i><span class="muted">Intermediate · later</span><i></i><span class="muted">Final · later</span></div>
       </div>
     </section>`;
-  window.scrollTo({ top: 0 });
+  finishRender();
 }
 
 function renderLibrary() {
@@ -828,7 +1255,7 @@ function renderLibrary() {
       </div>
       <p class="source-note">The three ten-paper mock series are user-generated practice material from the supplied artifact links. The PDFs above are preserved as provided and act as the official reference layer.</p>
     </section>`;
-  window.scrollTo({ top: 0 });
+  finishRender();
 }
 
 function renderCreateHub() {
@@ -861,7 +1288,7 @@ function renderCreateHub() {
       }).join('')}</div>` : `<div class="empty-state"><h2>No custom tests yet.</h2><p>Choose a CA level above to create your first paper.</p></div>`}
       <p class="source-note">Pattern defaults follow ICAI's New Scheme of Education and Training and current examination guidance. You can create a shorter practice test without changing the official reference shown in the builder.</p>
     </section>`;
-  window.scrollTo({ top: 0 });
+  finishRender();
 }
 
 function renderPaperChoice(levelKey) {
@@ -884,7 +1311,7 @@ function renderPaperChoice(levelKey) {
         </button>`).join('')}
       </div>
     </section>`;
-  window.scrollTo({ top: 0 });
+  finishRender();
 }
 
 function openQuestionBankModal() {
@@ -947,7 +1374,7 @@ function renderBuilderEditor() {
         </div>
       </div>
     </section>`;
-  window.scrollTo({ top: 0 });
+  finishRender();
 }
 
 async function renderPicker(subject) {
@@ -980,9 +1407,86 @@ async function renderPicker(subject) {
           }).join('')}
         </div>
       </section>`;
-    window.scrollTo({ top: 0 });
+    finishRender();
   } catch (error) { renderError(error); }
 }
+
+function examQuickbar({ total, exitAction = 'back-papers', submitAction = 'submit', submitLabel = 'Submit' }) {
+  if (state.review) {
+    return `<div class="exam-quickbar"><button class="button secondary small" data-action="open-palette">Question ${state.current + 1} of ${total}</button><button class="button coral small" data-action="back-results">Back to result</button></div>`;
+  }
+  return `<div class="exam-quickbar">
+    <button class="button secondary small" data-action="open-palette">Q ${state.current + 1}/${total}</button>
+    <span class="quick-time" data-quick-time aria-hidden="true">--:--:--</span>
+    <button class="button ghost small" data-action="toggle-pause" data-compact aria-pressed="false">Pause</button>
+    <button class="button coral small" data-action="${submitAction}">${escapeHTML(submitLabel)}</button>
+    <button class="button ghost small quick-exit" data-action="${exitAction}">Exit</button>
+  </div>`;
+}
+
+// The palette lives in the desktop sidebar, which is hidden on a phone. This
+// puts the same jump-to-question grid one tap away at any width.
+function openPaletteModal() {
+  const isCustom = Boolean(state.customTest);
+  const test = isCustom ? state.customTest : currentTest();
+  if (!test) return;
+  const jump = isCustom ? 'custom-jump' : 'jump';
+  const flagged = new Set(state.session?.flagged || []);
+  const subjectiveCustom = isCustom && test.formatMode === 'subjective';
+  const selected = new Set(state.session?.selectedQuestions || []);
+  const dots = test.questions.map((question, index) => {
+    const answered = subjectiveCustom
+      ? selected.has(index)
+      : Object.prototype.hasOwnProperty.call(state.session?.answers || {}, index);
+    const label = `Question ${index + 1}${answered ? (subjectiveCustom ? ', selected' : ', answered') : ', not answered'}${flagged.has(index) ? ', marked for review' : ''}`;
+    return `<button class="question-dot ${answered ? 'answered' : ''} ${flagged.has(index) ? 'flagged' : ''} ${state.current === index ? 'current' : ''}" data-action="${jump}" data-index="${index}" aria-label="${label}">${index + 1}</button>`;
+  }).join('');
+  const answeredCount = subjectiveCustom ? selected.size : Object.keys(state.session?.answers || {}).length;
+  openModal(`<h2 id="modal-title">Jump to a question</h2>
+    <p>${answeredCount} of ${test.questions.length} done. Green means answered, gold means marked for review.</p>
+    <div class="palette palette-modal">${dots}</div>
+    <div class="palette-legend palette-legend-modal"><span class="legend-row"><i class="legend-swatch done"></i> Answered</span><span class="legend-row"><i class="legend-swatch review"></i> Marked for review</span><span class="legend-row"><i class="legend-swatch"></i> Not answered</span></div>`);
+}
+
+// Selecting an answer used to rebuild the whole screen, which threw keyboard
+// focus back to the top and re-announced the entire page. Now only the parts
+// that changed are touched, so focus stays on the option you just chose.
+function syncMcqSelection(index, total) {
+  const options = [...document.querySelectorAll('.options .option')];
+  options.forEach((option, position) => {
+    const isSelected = position === index;
+    option.classList.toggle('selected', isSelected);
+    option.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+    option.tabIndex = isSelected ? 0 : -1;
+  });
+  options[index]?.focus({ preventScroll: true });
+  document.querySelectorAll(`.question-dot[data-index="${state.current}"]`).forEach(dot => dot.classList.add('answered'));
+  const answered = Object.keys(state.session?.answers || {}).length;
+  const percent = total ? Math.round((answered / total) * 100) : 0;
+  const line = document.querySelector('.exam-progress-line span');
+  if (line) line.style.width = `${percent}%`;
+  const copy = document.querySelectorAll('.exam-progress-copy span');
+  if (copy[0]) copy[0].textContent = `${answered} answered`;
+  if (copy[1]) copy[1].textContent = `${percent}%`;
+  const letter = String.fromCharCode(65 + index);
+  announce(`Option ${letter} selected for question ${state.current + 1}. ${answered} of ${total} answered.`);
+}
+
+const SHORTCUT_HELP = `<h2 id="modal-title">Keyboard shortcuts</h2>
+  <p>These work while a paper is open, so you can answer without reaching for the mouse.</p>
+  <dl class="shortcut-list">
+    <div><dt><kbd>A</kbd> <kbd>B</kbd> <kbd>C</kbd> <kbd>D</kbd></dt><dd>Choose that answer</dd></div>
+    <div><dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></dt><dd>Choose that answer</dd></div>
+    <div><dt><kbd>&rarr;</kbd> or <kbd>N</kbd></dt><dd>Next question</dd></div>
+    <div><dt><kbd>&larr;</kbd> or <kbd>P</kbd></dt><dd>Previous question</dd></div>
+    <div><dt><kbd>&uarr;</kbd> <kbd>&darr;</kbd></dt><dd>Move down the answer list</dd></div>
+    <div><dt><kbd>M</kbd></dt><dd>Mark this question for review</dd></div>
+    <div><dt><kbd>G</kbd></dt><dd>Open the jump-to-question grid</dd></div>
+    <div><dt><kbd>K</kbd></dt><dd>Pause or resume the paper</dd></div>
+    <div><dt><kbd>?</kbd></dt><dd>Show this list</dd></div>
+    <div><dt><kbd>Esc</kbd></dt><dd>Close whatever is open</dd></div>
+  </dl>
+  <p class="modal-note">Left and right always move through the paper; up and down move down the four answers. Nothing here needs the mouse.</p>`;
 
 function renderExamSidebar(test, result = null) {
   const answered = Object.keys(state.session.answers).length;
@@ -993,22 +1497,24 @@ function renderExamSidebar(test, result = null) {
       <button class="back-link" data-action="back-papers">← Exit paper</button>
       <span class="exam-label">${escapeHTML(test.paper)}</span>
       <h2>${escapeHTML(test.title)}</h2>
-      <div class="timer"><span>${state.review ? 'Review mode' : 'Time left'}</span><strong data-timer>${state.review ? '—' : formatTime(test.duration)}</strong></div>
+      <div class="timer"><span data-timer-label>${state.review ? 'Review mode' : 'Time left'}</span><strong data-timer>${state.review ? '—' : formatTime(remainingSeconds(test.duration))}</strong></div>
       <div class="exam-progress"><div class="exam-progress-line"><span style="width:${progress}%"></span></div><div class="exam-progress-copy"><span>${answered} answered</span><span>${progress}%</span></div></div>
-      <div class="palette" aria-label="Question palette">
+      <div class="palette" role="group" aria-label="Question palette">
         ${test.questions.map((question, index) => {
           const answer = state.session.answers[index];
           const hasAnswer = Object.prototype.hasOwnProperty.call(state.session.answers, index);
           const correctness = result && hasAnswer ? (answer === question.answer ? 'correct' : 'wrong') : '';
-          return `<button class="question-dot ${hasAnswer ? 'answered' : ''} ${flagged.has(index) ? 'flagged' : ''} ${state.current === index ? 'current' : ''} ${correctness}" data-action="jump" data-index="${index}" aria-label="Question ${index + 1}${hasAnswer ? ', answered' : ''}">${index + 1}</button>`;
+          const dotState = `${hasAnswer ? ', answered' : ', not answered'}${flagged.has(index) ? ', marked for review' : ''}`;
+          return `<button class="question-dot ${hasAnswer ? 'answered' : ''} ${flagged.has(index) ? 'flagged' : ''} ${state.current === index ? 'current' : ''} ${correctness}" data-action="jump" data-index="${index}" ${state.current === index ? 'aria-current="true"' : ''} aria-label="Question ${index + 1}${dotState}">${index + 1}</button>`;
         }).join('')}
       </div>
       <div class="palette-legend"><span class="legend-row"><i class="legend-swatch done"></i> Answered</span><span class="legend-row"><i class="legend-swatch review"></i> Marked for review</span><span class="legend-row"><i class="legend-swatch"></i> Not answered</span></div>
       <div class="sidebar-bottom">
         ${state.review ? `<button class="button coral" data-action="back-results">Back to result</button>` : `<button class="button coral" data-action="submit">Submit paper</button>`}
+        ${state.review ? '' : `<button class="button ghost" data-action="toggle-pause" aria-pressed="false">Pause paper</button>`}
         <button class="button secondary" data-action="back-papers">Save & exit</button>
       </div>
-      <p class="sidebar-note">Responses save automatically in this browser. No answer photo or response leaves this device.</p>
+      <p class="sidebar-note">Every answer saves by itself as you go. Nothing you write or photograph leaves this device. <a href="#help">How saving works</a></p>
     </aside>`;
 }
 
@@ -1056,7 +1562,8 @@ function renderMcqExam() {
             ${question.options.map((option, index) => {
               const isCorrect = state.review && index === question.answer;
               const isWrong = state.review && hasAnswer && selected === index && selected !== question.answer;
-              return `<button class="option ${selected === index ? 'selected' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" data-action="select-option" data-index="${index}" role="radio" aria-checked="${selected === index}" ${state.review ? 'disabled' : ''}><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`;
+              const roving = hasAnswer ? (selected === index ? 0 : -1) : (index === 0 ? 0 : -1);
+              return `<button class="option ${selected === index ? 'selected' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" data-action="select-option" data-index="${index}" role="radio" tabindex="${roving}" aria-checked="${selected === index}" ${state.review ? 'disabled' : ''}><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`;
             }).join('')}
           </div>
           ${state.review ? `<p class="review-note">Correct answer: ${String.fromCharCode(65 + question.answer)}${hasAnswer ? selected === question.answer ? ' · Your response was correct.' : ` · You selected ${String.fromCharCode(65 + selected)}.` : ' · You skipped this question.'}</p>` : ''}
@@ -1065,11 +1572,17 @@ function renderMcqExam() {
           <div class="exam-controls-group"><button class="button secondary small" data-action="previous" ${state.current === 0 ? 'disabled' : ''}>← Previous</button>${state.review ? '' : `<button class="button ghost small" data-action="toggle-flag">${flagged ? 'Unmark review' : 'Mark for review'}</button>`}</div>
           <button class="button small" data-action="next" ${state.current === test.questions.length - 1 ? 'disabled' : ''}>Next question →</button>
         </div>
+        <p class="shortcut-hint">Tip: press <kbd>A</kbd>–<kbd>D</kbd> to answer and <kbd>&rarr;</kbd> for the next question. <button class="link-button" data-action="shortcut-help">See all shortcuts</button></p>
       </div></main>
+      ${examQuickbar({ total: test.questions.length })}
     </section>`;
-  if (!state.review) startCountdown(test.duration, state.session.startedAt, () => submitMcq(true));
+  if (!state.review) startCountdown(test.duration, () => {
+    toast('Time is up. This paper has been submitted and scored.');
+    submitMcq(true);
+  });
   else stopTimer();
-  window.scrollTo({ top: 0 });
+  renderPauseOverlay();
+  finishRender();
 }
 
 function calculateResult(test) {
@@ -1134,7 +1647,7 @@ function renderMcqResults(subject, paper) {
         </div>
         <div class="result-breakdown"><h2>Section breakdown</h2>${[...result.sections.entries()].map(([section, row]) => `<div class="breakdown-row"><span>${escapeHTML(section)}</span><div class="breakdown-track"><span style="width:${(row.correct / row.total) * 100}%"></span></div><b>${row.correct}/${row.total}</b></div>`).join('')}</div>
       </section>`;
-    window.scrollTo({ top: 0 });
+    finishRender();
   };
   loading('Calculating your result…');
   begin().catch(renderError);
@@ -1233,12 +1746,12 @@ function renderSubjectiveSidebar(data, paper) {
       <button class="back-link" data-action="back-papers">← Exit paper</button>
       <span class="exam-label">${escapeHTML(data.paper)} · Mock ${paper.number}</span>
       <h2>${escapeHTML(data.title)}</h2>
-      <div class="timer"><span>Time left</span><strong data-timer>${formatTime(data.duration)}</strong></div>
+      <div class="timer"><span data-timer-label>Time left</span><strong data-timer>${formatTime(remainingSeconds(data.duration))}</strong></div>
       <div class="exam-progress"><div class="exam-progress-line"><span style="width:${progress}%"></span></div><div class="exam-progress-copy"><span>${selected.size} questions</span><span>${Math.max(0, 5 - selected.size)} to choose</span></div></div>
       <div class="palette" aria-label="Question palette">${paper.questions.map(question => `<button class="question-dot ${selected.has(question.number) ? 'answered' : ''}" data-action="scroll-subjective" data-index="${question.number}">${question.number}</button>`).join('')}</div>
       <div class="palette-legend"><span class="legend-row"><i class="legend-swatch done"></i> Selected to attempt</span><span class="legend-row"><i class="legend-swatch"></i> Not selected</span></div>
-      <div class="sidebar-bottom"><button class="button coral" data-action="finish-subjective">Finish attempt</button><button class="button secondary" data-action="back-papers">Save & exit</button></div>
-      <p class="sidebar-note">Answer photos are stored in this browser using local device storage. They are not sent to a server.</p>
+      <div class="sidebar-bottom"><button class="button coral" data-action="finish-subjective">Finish attempt</button><button class="button ghost" data-action="toggle-pause" aria-pressed="false">Pause paper</button><button class="button secondary" data-action="back-papers">Save & exit</button></div>
+      <p class="sidebar-note">Answer photos stay in this browser on this device. They are never sent to a server. <a href="#help">How saving works</a></p>
     </aside>`;
 }
 
@@ -1268,6 +1781,7 @@ function renderSubjectiveExam() {
     <section class="exam-shell">
       ${renderSubjectiveSidebar(data, paper)}
       <main class="subjective-main"><div class="subjective-inner">
+        <h1 class="subjective-title">${escapeHTML(data.title)} <span>Mock Paper ${paper.number}</span></h1>
         <div class="subjective-banner"><p><b>Question 1 is compulsory.</b> Select any four of Questions 2–6. Open a question, write your answer on paper, then add one or more clear photos below it.</p><span class="attempt-count">${selected.size}/5 questions selected</span></div>
         ${paper.questions.map(question => {
           const isSelected = selected.has(question.number);
@@ -1285,13 +1799,15 @@ function renderSubjectiveExam() {
         }).join('')}
         <div class="subjective-actions"><span><b>Auto-saved</b><br><small>Photos stay on this device</small></span><button class="button coral" data-action="finish-subjective">Finish attempt</button></div>
       </div></main>
+      ${examQuickbar({ total: paper.questions.length, submitAction: 'finish-subjective', submitLabel: 'Finish' })}
     </section>`;
   paper.questions.forEach(question => hydratePhotoGrid(question.number).catch(() => {}));
-  startCountdown(data.duration, state.session.startedAt, () => {
+  startCountdown(data.duration, () => {
     toast('Time is up. Your saved work is still available.');
     openSubjectiveFinishModal(true);
   });
-  window.scrollTo({ top: 0 });
+  renderPauseOverlay();
+  finishRender();
 }
 
 async function openSubjectiveFinishModal(timeExpired = false) {
@@ -1329,7 +1845,7 @@ async function renderSubjectiveResult(subject, paperNumber) {
         </div>
         <div class="result-breakdown"><h2>Attempt checklist</h2>${state.data.papers[state.paper - 1].questions.map(question => `<div class="breakdown-row"><span>Question ${question.number}${question.compulsory ? ' · compulsory' : ''}</span><div class="breakdown-track"><span style="width:${selected.has(question.number) ? '100' : '0'}%"></span></div><b>${selected.has(question.number) ? 'Selected' : 'Skipped'}</b></div>`).join('')}</div>
       </section>`;
-    window.scrollTo({ top: 0 });
+    finishRender();
   } catch (error) { renderError(error); }
 }
 
@@ -1382,7 +1898,7 @@ function renderCustomSidebar(test) {
   const answered = customAnswerCount(test);
   const progress = test.questions.length ? Math.round((answered / (test.formatMode === 'subjective' ? test.attemptCount || 5 : test.questions.length)) * 100) : 0;
   const selected = new Set(state.session.selectedQuestions || [0]);
-  return `<aside class="exam-sidebar"><button class="back-link" data-action="create-hub">← Exit test</button><span class="exam-label">${escapeHTML(test.paperName || 'Foundation')}</span><h2>${escapeHTML(test.title)}</h2><div class="timer"><span>Time left</span><strong data-timer>${formatTime(test.duration * 60)}</strong></div><div class="exam-progress"><div class="exam-progress-line"><span style="width:${Math.min(100, progress)}%"></span></div><div class="exam-progress-copy"><span>${answered} ${test.formatMode === 'subjective' ? 'selected' : 'answered'}</span><span>${test.formatMode === 'subjective' ? `of ${test.attemptCount || 5}` : `${progress}%`}</span></div></div><div class="palette" aria-label="Question palette">${test.questions.map((question,index) => `<button class="question-dot ${test.formatMode === 'subjective' ? (selected.has(index) ? 'answered' : '') : (Object.prototype.hasOwnProperty.call(state.session.answers,index) ? 'answered' : '')} ${state.current === index ? 'current' : ''}" data-action="custom-jump" data-index="${index}">${index + 1}</button>`).join('')}</div><div class="palette-legend"><span class="legend-row"><i class="legend-swatch done"></i> ${test.formatMode === 'subjective' ? 'Selected to attempt' : 'Answered'}</span><span class="legend-row"><i class="legend-swatch"></i> ${test.formatMode === 'subjective' ? 'Not selected' : 'Not answered'}</span></div><div class="sidebar-bottom"><button class="button coral" data-action="custom-finish">Finish test</button><button class="button secondary" data-action="create-hub">Save & exit</button></div><p class="sidebar-note">${test.formatMode === 'subjective' ? 'Question 1 is compulsory; choose four more questions and upload answer photos.' : 'MCQs score automatically. Wrong answers carry the official negative marking.'}</p></aside>`;
+  return `<aside class="exam-sidebar"><button class="back-link" data-action="create-hub">← Exit test</button><span class="exam-label">${escapeHTML(test.paperName || 'Foundation')}</span><h2>${escapeHTML(test.title)}</h2><div class="timer"><span data-timer-label>Time left</span><strong data-timer>${formatTime(remainingSeconds(test.duration * 60))}</strong></div><div class="exam-progress"><div class="exam-progress-line"><span style="width:${Math.min(100, progress)}%"></span></div><div class="exam-progress-copy"><span>${answered} ${test.formatMode === 'subjective' ? 'selected' : 'answered'}</span><span>${test.formatMode === 'subjective' ? `of ${test.attemptCount || 5}` : `${progress}%`}</span></div></div><div class="palette" aria-label="Question palette">${test.questions.map((question,index) => `<button class="question-dot ${test.formatMode === 'subjective' ? (selected.has(index) ? 'answered' : '') : (Object.prototype.hasOwnProperty.call(state.session.answers,index) ? 'answered' : '')} ${state.current === index ? 'current' : ''}" data-action="custom-jump" data-index="${index}">${index + 1}</button>`).join('')}</div><div class="palette-legend"><span class="legend-row"><i class="legend-swatch done"></i> ${test.formatMode === 'subjective' ? 'Selected to attempt' : 'Answered'}</span><span class="legend-row"><i class="legend-swatch"></i> ${test.formatMode === 'subjective' ? 'Not selected' : 'Not answered'}</span></div><div class="sidebar-bottom"><button class="button coral" data-action="custom-finish">Finish test</button><button class="button ghost" data-action="toggle-pause" aria-pressed="false">Pause paper</button><button class="button secondary" data-action="create-hub">Save & exit</button></div><p class="sidebar-note">${test.formatMode === 'subjective' ? 'Question 1 is compulsory; choose four more questions and upload answer photos.' : 'MCQs score automatically. Wrong answers carry the official negative marking.'}</p></aside>`;
 }
 
 async function startCustomTest(id, options = {}) {
@@ -1418,12 +1934,13 @@ function renderCustomExam() {
   const sourceMeta = `<div class="custom-question-source"><span class="source-badge ${question.sourceType || 'custom'}">${escapeHTML(question.sourceLabel || 'Your question')}</span>${question.sourceUrl ? `<a href="${escapeHTML(question.sourceUrl)}" target="_blank" rel="noopener">Source ↗</a>` : ''}</div>`;
   const reasoning = question.reasoning?.trim() ? `<details class="custom-rationale"><summary>${question.sourceType === 'generated' ? 'Verified reasoning' : 'Answer reasoning'}</summary><p>${escapeHTML(question.reasoning)}</p>${question.verification?.checks?.length ? `<small>${escapeHTML(question.verification.checks.join(' · '))}</small>` : ''}</details>` : '';
   const body = question.type === 'mcq'
-    ? `<div class="options" role="radiogroup" aria-label="Answer options">${question.options.map((option,index) => `<button class="option ${selected === index ? 'selected' : ''}" data-action="custom-select-option" data-index="${index}" role="radio" aria-checked="${selected === index}"><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`).join('')}</div><p class="custom-score-note">Select one answer. ${test.negative ? `Wrong answers deduct ${test.negative} mark.` : 'There is no negative marking for this paper.'}</p>`
+    ? `<div class="options" role="radiogroup" aria-label="Answer options">${question.options.map((option,index) => `<button class="option ${selected === index ? 'selected' : ''}" data-action="custom-select-option" data-index="${index}" role="radio" tabindex="${hasAnswer ? (selected === index ? 0 : -1) : (index === 0 ? 0 : -1)}" aria-checked="${selected === index}"><span class="option-letter">${String.fromCharCode(65 + index)}</span><span>${escapeHTML(option)}</span></button>`).join('')}</div><p class="custom-score-note">Select one answer. ${test.negative ? `Wrong answers deduct ${test.negative} mark.` : 'There is no negative marking for this paper.'}</p>`
     : `<div><button class="button ${isAttempted ? 'coral' : 'secondary'} small" data-action="custom-toggle-attempt" data-index="${state.current}">${isAttempted ? 'Selected to attempt' : 'Select this question'}</button><section class="answer-desk"><div class="answer-desk-head"><div><h4>Your answer sheet</h4><p>Write your answer on paper, then add one or more clear photos.</p></div><label class="button small upload-button">Add photos<input type="file" accept="image/*" capture="environment" multiple data-custom-photo-input="${question.id}" aria-label="Add answer photos"></label></div><div class="photo-grid" data-custom-photo-grid="${question.id}"><div class="empty-uploads">Loading saved answer photos…</div></div><textarea class="answer-note" data-custom-note="${question.id}" placeholder="Optional note: assumptions, workings, or what to improve…">${escapeHTML(state.session.notes[question.id] || '')}</textarea></section></div>`;
-  app.innerHTML = `<section class="exam-shell">${renderCustomSidebar(test)}<main class="exam-main"><div class="exam-main-inner"><div class="question-meta"><strong>${escapeHTML(test.paperName || 'Foundation paper')}</strong><span>Question ${state.current + 1} of ${test.questions.length} · ${question.marks} marks${test.formatMode === 'subjective' ? (state.current === 0 ? ' · Compulsory' : ' · Optional') : ''}</span></div><article class="question-card"><span class="question-number">${state.current + 1}</span>${sourceMeta}<h1 class="question-text">${escapeHTML(question.text)}</h1>${body}${reasoning}</article><div class="exam-controls"><div class="exam-controls-group"><button class="button secondary small" data-action="custom-previous" ${state.current === 0 ? 'disabled' : ''}>← Previous</button></div><button class="button small" data-action="custom-next" ${state.current === test.questions.length - 1 ? 'disabled' : ''}>Next question →</button></div></div></main></section>`;
+  app.innerHTML = `<section class="exam-shell">${renderCustomSidebar(test)}<main class="exam-main"><div class="exam-main-inner"><div class="question-meta"><strong>${escapeHTML(test.paperName || 'Foundation paper')}</strong><span>Question ${state.current + 1} of ${test.questions.length} · ${question.marks} marks${test.formatMode === 'subjective' ? (state.current === 0 ? ' · Compulsory' : ' · Optional') : ''}</span></div><article class="question-card"><span class="question-number">${state.current + 1}</span>${sourceMeta}<h1 class="question-text">${escapeHTML(question.text)}</h1>${body}${reasoning}</article><div class="exam-controls"><div class="exam-controls-group"><button class="button secondary small" data-action="custom-previous" ${state.current === 0 ? 'disabled' : ''}>← Previous</button></div><button class="button small" data-action="custom-next" ${state.current === test.questions.length - 1 ? 'disabled' : ''}>Next question →</button></div><p class="shortcut-hint">Tip: press <kbd>A</kbd>–<kbd>D</kbd> to answer and <kbd>&rarr;</kbd> for the next question. <button class="link-button" data-action="shortcut-help">See all shortcuts</button></p></div></main>${examQuickbar({ total: test.questions.length, exitAction: 'create-hub', submitAction: 'custom-finish', submitLabel: 'Finish' })}</section>`;
   if (question.type === 'subjective') hydrateCustomPhotoGrid(test.id, question.id).catch(() => {});
-  startCountdown(test.duration * 60, state.session.startedAt, () => { toast('Time is up. Your saved work is still available.'); openCustomFinishModal(true); });
-  window.scrollTo({ top: 0 });
+  startCountdown(test.duration * 60, () => { toast('Time is up. Your saved work is still available.'); openCustomFinishModal(true); });
+  renderPauseOverlay();
+  finishRender();
 }
 
 async function openCustomFinishModal(timeExpired = false) {
@@ -1460,15 +1977,18 @@ async function renderCustomResults(id) {
   const photos = await countCustomPhotos(test.id, subjective);
   const sourceMix = [...new Set(test.questions.map(question => question.sourceLabel || 'Your question'))];
   app.innerHTML = `<section class="page-shell results-page"><div class="result-hero"><div class="score-ring" style="--score:${result.percent ?? 0}"><div class="score-ring-inner"><span><b>${result.percent === null ? '—' : `${result.percent}%`}</b><small>MCQ score</small></span></div></div><div><p class="eyebrow">Custom Foundation test complete</p><h1>${result.percent === null ? 'Your answer set is saved.' : result.percent >= 70 ? 'Strong work.' : 'A useful baseline.'}</h1><p>${escapeHTML(test.title)} · ${escapeHTML(test.paperName || '')}. Subjective answers still need manual review.</p><div class="result-actions"><button class="button coral" data-action="reopen-custom" data-id="${test.id}">Reopen test</button><button class="button secondary" data-action="retake-custom" data-id="${test.id}">Retake</button><button class="button ghost" data-action="create-hub">Choose another</button></div></div></div><p class="source-note">Question mix: ${sourceMix.map(escapeHTML).join(' · ')}</p><div class="result-grid"><article class="result-stat"><span>MCQ correct</span><b>${result.correct}</b></article><article class="result-stat"><span>MCQ wrong</span><b>${result.wrong}</b></article><article class="result-stat"><span>MCQ skipped</span><b>${result.skipped}</b></article><article class="result-stat"><span>Subjective photos</span><b>${photos}</b></article></div><div class="result-breakdown"><h2>Review status</h2>${test.questions.map((question,index) => `<div class="breakdown-row"><span>Question ${index + 1} · ${question.type === 'mcq' ? 'MCQ' : 'Subjective'}</span><div class="breakdown-track"><span style="width:${question.type === 'mcq' && Object.prototype.hasOwnProperty.call(state.session.answers,index) ? '100' : question.type === 'subjective' && state.session.notes?.[question.id] ? '60' : '0'}%"></span></div><b>${question.type === 'mcq' ? (state.session.answers[index] === undefined ? 'Skipped' : Number(state.session.answers[index]) === Number(question.answer) ? 'Correct' : 'Review') : 'Manual review'}</b></div>`).join('')}</div></section>`;
-  window.scrollTo({ top: 0 });
+  finishRender();
 }
 
 async function route() {
   closeModal();
   stopTimer();
+  document.querySelector('#pause-overlay')?.remove();
+  document.body.classList.remove('exam-paused');
   const parts = location.hash.replace(/^#/, '').split('/').filter(Boolean);
   const page = parts[0] || 'home';
   if (page === 'home') return renderHome();
+  if (page === 'help') return renderHelp();
   if (page === 'library') return renderLibrary();
   if (page === 'create') return renderCreateHub();
   if (page === 'custom' && parts[1]) return startCustomTest(parts[1]);
@@ -1492,6 +2012,22 @@ document.addEventListener('click', async event => {
   const action = control.dataset.action;
 
   if (action === 'home') return navigate('#home');
+  if (action === 'help') return navigate('#help');
+  if (action === 'open-palette') return openPaletteModal();
+  if (action === 'shortcut-help') return openModal(SHORTCUT_HELP);
+  if (action === 'toggle-pause') return togglePause();
+  if (action === 'backup-download') {
+    const summary = document.querySelector('[data-backup-summary]');
+    const bytes = Number(summary?.dataset.photoBytes || 0);
+    const count = Number(summary?.dataset.photoCount || 0);
+    if (!count) return downloadBackup(false);
+    if (bytes > PHOTO_BUDGET) {
+      return openModal(`<h2 id="modal-title">Your answer photos are large</h2><p>You have ${count} answer photo${count === 1 ? '' : 's'} taking up ${formatBytes(bytes)}. Putting them all in one file can be too much for the browser to handle at once.</p><p>Saving answers and notes only gives you a small file that always works. Your photos stay exactly where they are on this device either way.</p><div class="inline-actions"><button class="button coral" data-action="backup-answers-only">Save answers and notes only</button><button class="button secondary" data-action="backup-with-photos">Try including photos</button></div>`);
+    }
+    return openModal(`<h2 id="modal-title">Save a backup file</h2><p>This writes your answers, notes, custom tests, and ${count} answer photo${count === 1 ? '' : 's'} (${formatBytes(bytes)}) into a single file in your downloads folder. Keep it in your email or cloud drive and you can restore it on any device.</p><div class="inline-actions"><button class="button coral" data-action="backup-with-photos">Save everything</button><button class="button secondary" data-action="backup-answers-only">Answers and notes only</button></div>`);
+  }
+  if (action === 'backup-with-photos') { closeModal(); return downloadBackup(true); }
+  if (action === 'backup-answers-only') { closeModal(); return downloadBackup(false); }
   if (action === 'close-modal') return closeModal();
   if (action === 'create-hub') return navigate('#create');
   if (action === 'choose-level') {
@@ -1575,9 +2111,10 @@ document.addEventListener('click', async event => {
     const test = state.customTest;
     const question = test?.questions[state.current];
     if (!test || !question || question.type !== 'mcq') return;
-    state.session.answers[state.current] = Number(control.dataset.index);
+    const chosen = Number(control.dataset.index);
+    state.session.answers[state.current] = chosen;
     writeCustomSession();
-    return renderCustomExam();
+    return syncMcqSelection(chosen, test.questions.length);
   }
   if (action === 'custom-toggle-attempt') {
     const test = state.customTest;
@@ -1593,7 +2130,7 @@ document.addEventListener('click', async event => {
   }
   if (action === 'custom-previous') { state.current = Math.max(0, state.current - 1); return renderCustomExam(); }
   if (action === 'custom-next') { state.current = Math.min(state.customTest.questions.length - 1, state.current + 1); return renderCustomExam(); }
-  if (action === 'custom-jump') { state.current = Number(control.dataset.index); return renderCustomExam(); }
+  if (action === 'custom-jump') { state.current = Number(control.dataset.index); closeModal(); return renderCustomExam(); }
   if (action === 'custom-finish') return openCustomFinishModal(false);
   if (action === 'confirm-custom') {
     state.session.completedAt = Date.now();
@@ -1612,9 +2149,10 @@ document.addEventListener('click', async event => {
   }
 
   if (action === 'select-option' && !state.review) {
-    state.session.answers[state.current] = Number(control.dataset.index);
+    const chosen = Number(control.dataset.index);
+    state.session.answers[state.current] = chosen;
     writeSession();
-    return renderMcqExam();
+    return syncMcqSelection(chosen, currentTest()?.questions.length || 0);
   }
   if (action === 'previous') {
     state.current = Math.max(0, state.current - 1);
@@ -1626,6 +2164,7 @@ document.addEventListener('click', async event => {
   }
   if (action === 'jump') {
     state.current = Number(control.dataset.index);
+    closeModal();
     return renderMcqExam();
   }
   if (action === 'toggle-flag') {
@@ -1724,6 +2263,23 @@ document.addEventListener('click', async event => {
 });
 
 document.addEventListener('change', async event => {
+  const restoreInput = event.target.closest('[data-restore-input]');
+  if (restoreInput) {
+    const file = restoreInput.files?.[0];
+    restoreInput.value = '';
+    if (!file) return;
+    restoreInput.disabled = true;
+    try {
+      const result = await restoreBackup(file);
+      toast(`Restored ${result.attempts} saved item${result.attempts === 1 ? '' : 's'}${result.photos ? ` and ${result.photos} answer photo${result.photos === 1 ? '' : 's'}` : ''}.`);
+      await refreshBackupSummary();
+    } catch (error) {
+      toast(error.message || 'That backup file could not be read.');
+    } finally {
+      restoreInput.disabled = false;
+    }
+    return;
+  }
   const builderField = event.target.closest('[data-builder-field]');
   if (builderField && state.builder) {
     const key = builderField.dataset.builderField;
@@ -1815,9 +2371,78 @@ modalBackdrop.addEventListener('click', event => {
   if (event.target === modalBackdrop) closeModal();
 });
 
+// Keyboard control of the answer sheet. A hundred MCQs is a lot of clicking
+// when you are short of time, and a button-based radio group is unusable with a
+// keyboard or screen reader unless the arrow keys work the way they do in a
+// real radio group.
+function moveOptionFocus(step) {
+  const options = [...document.querySelectorAll('.options .option:not([disabled])')];
+  if (options.length < 2) return false;
+  const from = options.indexOf(document.activeElement);
+  if (from < 0) return false;
+  options[(from + step + options.length) % options.length].click();
+  return true;
+}
+
+function chooseOption(index) {
+  const options = [...document.querySelectorAll('.options .option:not([disabled])')];
+  const target = options[index];
+  if (target) target.click();
+}
+
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !modalBackdrop.hidden) closeModal();
+  if (event.key === 'Escape') {
+    if (!modalBackdrop.hidden) return closeModal();
+    if (state.session?.paused && document.body.classList.contains('exam-active')) return togglePause();
+    return;
+  }
+  if (!modalBackdrop.hidden) return trapModalFocus(event);
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+  const target = event.target;
+  const tag = target?.tagName;
+  const typing = target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+  if (event.key === '?' && !typing) { event.preventDefault(); return openModal(SHORTCUT_HELP); }
+  if (typing || !document.body.classList.contains('exam-active')) return;
+  if (state.session?.paused) return;
+
+  const insideOptions = Boolean(target?.closest?.('.options'));
+  const isCustom = Boolean(state.customTest);
+  const nextAction = isCustom ? 'custom-next' : 'next';
+  const previousAction = isCustom ? 'custom-previous' : 'previous';
+  const press = selector => {
+    const button = document.querySelector(`[data-action="${selector}"]:not([disabled])`);
+    if (button) { event.preventDefault(); button.click(); }
+  };
+
+  switch (event.key) {
+    case 'ArrowDown':
+    case 'ArrowUp':
+      if (insideOptions && moveOptionFocus(event.key === 'ArrowDown' ? 1 : -1)) event.preventDefault();
+      return;
+    case 'ArrowRight':
+      return press(nextAction);
+    case 'ArrowLeft':
+      return press(previousAction);
+    default:
+      break;
+  }
+
+  const key = event.key.toLowerCase();
+  if (key === 'n') return press(nextAction);
+  if (key === 'p') return press(previousAction);
+  if (key === 'm') return press('toggle-flag');
+  if (key === 'g') { event.preventDefault(); return openPaletteModal(); }
+  if (key === 'k') { event.preventDefault(); return togglePause(); }
+  if (key >= 'a' && key <= 'd' && key.length === 1) { event.preventDefault(); return chooseOption(key.charCodeAt(0) - 97); }
+  if (key >= '1' && key <= '4' && key.length === 1) { event.preventDefault(); return chooseOption(Number(key) - 1); }
 });
+
+// A paused clock has to survive the tab closing, so write the elapsed time out
+// whenever the page goes away rather than only on the five-second tick.
+document.addEventListener('visibilitychange', () => { if (state.timer && document.hidden) saveActiveSession(); });
+window.addEventListener('pagehide', () => { if (state.timer) saveActiveSession(); });
 
 window.addEventListener('hashchange', route);
 route();
