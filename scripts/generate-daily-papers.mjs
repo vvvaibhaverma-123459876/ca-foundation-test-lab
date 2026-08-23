@@ -48,8 +48,8 @@ function escapeHtml(value = '') {
 
 function basePrompt(spec, index) {
   const common = 'This is daily batch ' + session + ', paper instance ' + index + ', for CA Foundation ' + spec.name + ' (Paper ' + spec.paper + '). Use the current ICAI Foundation pattern. Mix original practice questions inspired by syllabus/RTP themes; do not copy copyrighted text. Every item must include a correct answer and a concise, independently checked explanation. Return JSON only, no markdown.';
-  if (spec.kind === 'mcq') return common + '\nReturn an object with exactly this shape: {"questions":[...]}. Create exactly 100 MCQs. Each question must have number 1-100, section, text, options (exactly four distinct strings), answer (integer 0-3), reasoning (one or two sentences showing the calculation/rule), sourceType "generated", sourceLabel "Claude-generated · verified", and verification {status:"verified",method:string,checks:[string,...]}. Cover the full Paper ' + spec.paper + ' syllabus in balanced sections. Audit every answer against the reasoning before returning it.';
-  return common + '\nReturn an object with exactly this shape: {"questions":[...]}. Create exactly six top-level 20-mark descriptive questions. Question 1 must be compulsory and Questions 2-6 optional. Each question must have number 1-6, marks 20, compulsory (true only for Question 1), text, reasoning (a concise answer outline/marking logic), sourceType "generated", sourceLabel "Claude-generated · verified", and verification {status:"verified",method:string,checks:[string,...]}. Use realistic multi-part exam questions, with enough detail for a 20-mark answer.';
+  if (spec.kind === 'mcq') return common + '\nReturn an object with exactly this shape: {"questions":[...]}. Create exactly 100 MCQs. Each question must have number 1-100, section, text, options (exactly four distinct strings), answer (integer 0-3), reasoning (one concise sentence, <= 25 words), sourceType "generated", sourceLabel "Claude-generated · verified", and verification {status:"verified",method:"answer audit",checks:["calculation checked","distractors checked"]}. Cover the full Paper ' + spec.paper + ' syllabus in balanced sections. Audit every answer against the reasoning before returning it. Keep JSON compact.';
+  return common + '\nReturn an object with exactly this shape: {"questions":[...]}. Create exactly six top-level 20-mark descriptive questions. Question 1 must be compulsory and Questions 2-6 optional. Each question must have number 1-6, marks 20, compulsory (true only for Question 1), text, reasoning (a concise answer outline in <= 35 words), sourceType "generated", sourceLabel "Claude-generated · verified", and verification {status:"verified",method:"answer audit",checks:["syllabus checked","marking logic checked"]}. Use realistic multi-part exam questions. Keep JSON compact.';
 }
 
 async function askClaude(prompt) {
@@ -59,7 +59,7 @@ async function askClaude(prompt) {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model, max_tokens: 18000, thinking: { type: 'disabled' }, system: 'You are a meticulous ICAI CA Foundation paper setter and answer-key reviewer. Valid JSON only. Keep explanations concise so the complete paper fits in the response.', messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ model, max_tokens: 30000, thinking: { type: 'disabled' }, system: 'You are a meticulous ICAI CA Foundation paper setter and answer-key reviewer. Valid JSON only. Keep explanations concise so the complete paper fits in the response.', messages: [{ role: 'user', content: prompt }] })
       });
       if (!response.ok) throw new Error('Anthropic request failed: ' + response.status + ' ' + await response.text());
       const payload = await response.json();
