@@ -1,9 +1,6 @@
 name: Generate daily CA Foundation papers
 
 on:
-  schedule:
-    # GitHub Actions cron is UTC: 17:30 UTC = 23:00 IST.
-    - cron: '30 17 * * *'
   workflow_dispatch:
 
 permissions:
@@ -29,7 +26,7 @@ jobs:
       - name: Generate and validate five full papers
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: claude-opus-5
+          ANTHROPIC_MODEL: claude-sonnet-5
           CA_SESSION: ${{ github.run_started_at }}
         run: node scripts/generate-daily-papers.mjs
 

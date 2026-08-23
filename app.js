@@ -1265,7 +1265,7 @@ async function refreshBackupSummary() {
 // paid for once and re-reads work offline.
 // ---------------------------------------------------------------------------
 // This account's live model catalogue exposes the stable Sonnet 5 alias.
-const EXPLAIN_MODEL = 'claude-opus-5';
+const EXPLAIN_MODEL = 'claude-sonnet-5';
 const API_KEY_STORAGE = 'foundation-test-lab:api-key';
 const EXPLAIN_CACHE_KEY = 'foundation-test-lab:explanations';
 const EXPLAIN_ENDPOINT = 'https://api.anthropic.com/v1/messages';

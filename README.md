@@ -89,18 +89,18 @@ question. The generated JSON is also rendered into the static HTML files that
 the interactive app loads, so the browser does not need an API or question-bank
 service.
 
-.github/workflows/generate-daily-papers.yml runs at 11:00 PM India time
-(17:30 UTC), validates the response, commits the new static files, and lets
-GitHub Pages publish them. It also supports Run workflow for a manual test.
+.github/workflows/generate-daily-papers.yml keeps automatic scheduling disabled
+to control API cost. It validates the response, commits the new static files,
+and lets GitHub Pages publish them when you start it manually with Run workflow.
 Add ANTHROPIC_API_KEY under the repository's GitHub Settings -> Secrets and
 variables -> Actions before the first run; never commit the key or put it in
 the site. The local equivalent is:
 
     & 'C:\Program Files\nodejs\node.exe' scripts/generate-daily-papers.mjs
 
-The workflow intentionally has no push trigger, so its own generated commit
-cannot start an infinite loop. GitHub may start scheduled jobs a few minutes
-after the cron time during high load.
+The workflow intentionally has no push or schedule trigger, so generation only
+happens when you explicitly start it. Its own generated commit cannot start an
+infinite loop.
 
 The builder also includes a labelled mixed bank: paraphrased ICAI past-paper and
 RTP themes, institution-neutral coaching-style prompts, and generated questions.

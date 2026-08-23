@@ -18,7 +18,7 @@ try { env = { ...readEnvFile(await readFile(envPath, 'utf8')), ...env }; } catch
 const apiKey = env.ANTHROPIC_API_KEY;
 if (!apiKey) throw new Error('ANTHROPIC_API_KEY is required (set it locally or as a GitHub Actions secret).');
 
-const model = env.ANTHROPIC_MODEL || 'claude-opus-5';
+const model = env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 const session = (env.CA_SESSION || new Date().toISOString()).slice(0, 10);
 const subjectSpecs = {
   accounting: { code: 'F1', name: 'Accounting', paper: 1, kind: 'subjective', file: 'daily-accounting.html', duration: 180 },
