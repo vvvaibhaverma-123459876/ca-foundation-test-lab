@@ -10,6 +10,8 @@ A private, browser-based CA Foundation practice environment built from the suppl
 
 Then open [http://localhost:4173](http://localhost:4173).
 
+Live GitHub Pages site: https://vvvaibhaverma-123459876.github.io/ca-foundation-test-lab/
+
 For an iPhone or another device on the same Wi‑Fi, open the LAN address printed by the server, for example `http://192.168.1.9:4173`. `localhost` only works on the computer that is running the server. If Windows Firewall asks, allow Node.js on Private networks.
 
 Responses, notes, and uploaded answer photos are stored only in the current browser profile. There is no server-side database or external upload.
