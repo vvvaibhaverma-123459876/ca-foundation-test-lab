@@ -29,7 +29,7 @@ jobs:
       - name: Generate and validate five full papers
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: claude-sonnet-5
+          ANTHROPIC_MODEL: claude-opus-5
           CA_SESSION: ${{ github.run_started_at }}
         run: node scripts/generate-daily-papers.mjs
 

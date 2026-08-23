@@ -15,7 +15,7 @@ const response = await fetch('https://api.anthropic.com/v1/messages', {
   method: 'POST',
   headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
   body: JSON.stringify({
-    model: 'claude-sonnet-5',
+    model: 'claude-opus-5',
     max_tokens: 16000,
     system: 'You are a meticulous CA Foundation question setter. Return valid JSON only, without markdown fences.',
     messages: [{ role: 'user', content: prompt }]

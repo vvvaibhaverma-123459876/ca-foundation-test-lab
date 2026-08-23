@@ -18,7 +18,7 @@ try { env = { ...readEnvFile(await readFile(envPath, 'utf8')), ...env }; } catch
 const apiKey = env.ANTHROPIC_API_KEY;
 if (!apiKey) throw new Error('ANTHROPIC_API_KEY is required (set it locally or as a GitHub Actions secret).');
 
-const model = env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+const model = env.ANTHROPIC_MODEL || 'claude-opus-5';
 const session = (env.CA_SESSION || new Date().toISOString()).slice(0, 10);
 const subjectSpecs = {
   accounting: { code: 'F1', name: 'Accounting', paper: 1, kind: 'subjective', file: 'daily-accounting.html', duration: 180 },
@@ -32,7 +32,14 @@ const rotation = ['accounting', 'laws', 'quantitative', 'economics'][Math.abs(da
 const requestedSubjects = (env.CA_SUBJECTS ? env.CA_SUBJECTS.split(',').map(value => value.trim()).filter(Boolean) : ['accounting', 'laws', 'quantitative', 'economics', rotation]);
 
 function cleanJson(text) {
-  return text.trim().replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/i, '').trim();
+  const cleaned = text.trim().replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/i, '').trim();
+  const objectStart = cleaned.indexOf('{');
+  const arrayStart = cleaned.indexOf('[');
+  const starts = [objectStart, arrayStart].filter(index => index >= 0);
+  if (!starts.length) return cleaned;
+  const start = Math.min(...starts);
+  const end = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'));
+  return end > start ? cleaned.slice(start, end + 1) : cleaned;
 }
 
 function escapeHtml(value = '') {
