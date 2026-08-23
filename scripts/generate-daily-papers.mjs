@@ -114,14 +114,12 @@ function renderMcqHtml(spec, questions) {
   return '<section class="paper"><h2>Daily Claude Paper · ' + escapeHtml(spec.name) + ' · ' + escapeHtml(session) + '</h2><h3 class="sec-label">Full syllabus practice</h3><ol class="qs">' + rows + '</ol><div class="key-grid">' + key + '</div></section>\n';
 }
 
-const papers = [];
-for (let index = 0; index < requestedSubjects.length; index += 1) {
-  const subject = requestedSubjects[index];
+const papers = await Promise.all(requestedSubjects.map(async (subject, index) => {
   const spec = subjectSpecs[subject];
   process.stdout.write('Generating ' + (index + 1) + '/' + requestedSubjects.length + ': ' + spec.name + '…\n');
   const questions = validatePaper(spec, await askClaude(basePrompt(spec, index + 1)));
-  papers.push({ id: 'daily-' + session + '-' + subject + '-' + (index + 1), subject, ...spec, generatedAt: new Date().toISOString(), questions });
-}
+  return { id: 'daily-' + session + '-' + subject + '-' + (index + 1), subject, ...spec, generatedAt: new Date().toISOString(), questions };
+}));
 
 const bySubject = new Map();
 papers.forEach(paper => bySubject.set(paper.subject, [...(bySubject.get(paper.subject) || []), paper]));
