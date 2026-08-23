@@ -77,6 +77,31 @@ generated through the Anthropic question-setter pipeline are followed by 70
 deterministic verified questions. The API-generated set is stored as a static,
 key-free JSON asset for GitHub Pages.
 
+## Nightly Claude paper publishing
+
+The repository includes a single-provider pipeline in
+scripts/generate-daily-papers.mjs. It creates five Foundation papers per
+batch: one Accounting paper, one Business Laws paper, one Quantitative Aptitude
+paper, one Business Economics paper, and one rotating extra paper. Papers 1
+and 2 follow the six-question descriptive format; Papers 3 and 4 contain 100
+MCQs with answer keys, concise reasoning, and verification metadata for every
+question. The generated JSON is also rendered into the static HTML files that
+the interactive app loads, so the browser does not need an API or question-bank
+service.
+
+.github/workflows/generate-daily-papers.yml runs at 11:00 PM India time
+(17:30 UTC), validates the response, commits the new static files, and lets
+GitHub Pages publish them. It also supports Run workflow for a manual test.
+Add ANTHROPIC_API_KEY under the repository's GitHub Settings -> Secrets and
+variables -> Actions before the first run; never commit the key or put it in
+the site. The local equivalent is:
+
+    & 'C:\Program Files\nodejs\node.exe' scripts/generate-daily-papers.mjs
+
+The workflow intentionally has no push trigger, so its own generated commit
+cannot start an infinite loop. GitHub may start scheduled jobs a few minutes
+after the cron time during high load.
+
 The builder also includes a labelled mixed bank: paraphrased ICAI past-paper and
 RTP themes, institution-neutral coaching-style prompts, and generated questions.
 Generated questions carry answer reasoning and verification checks, and the

@@ -1,0 +1,47 @@
+name: Generate daily CA Foundation papers
+
+on:
+  schedule:
+    # GitHub Actions cron is UTC: 17:30 UTC = 23:00 IST.
+    - cron: '30 17 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-paper-generation
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the build
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate and validate five full papers
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: claude-sonnet-5
+          CA_SESSION: ${{ github.run_started_at }}
+        run: node scripts/generate-daily-papers.mjs
+
+      - name: Commit generated papers
+        shell: bash
+        run: |
+          if git diff --quiet -- data/daily-papers.json data/daily-accounting.html data/daily-laws.html data/daily-quantitative.html data/daily-economics.html; then
+            echo "No generated paper changes to publish."
+            exit 0
+          fi
+          git config user.name "ca-foundation-paper-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/daily-papers.json data/daily-accounting.html data/daily-laws.html data/daily-quantitative.html data/daily-economics.html
+          git commit -m "chore: publish daily CA Foundation papers"
+          git push

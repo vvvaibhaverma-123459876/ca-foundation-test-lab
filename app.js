@@ -28,6 +28,38 @@ const ARTIFACTS = {
     source: 'data/economics.html',
     duration: 2 * 60 * 60,
     description: 'One thousand selectable MCQs across ten timed, scored mock papers.'
+  },
+  'daily-accounting': {
+    title: 'Daily Claude · Accounting',
+    paper: 'Paper 1',
+    kind: 'subjective',
+    source: 'data/daily-accounting.html',
+    duration: 3 * 60 * 60,
+    description: 'Fresh Claude-generated full-format Accounting papers with answer outlines stored for review.'
+  },
+  'daily-laws': {
+    title: 'Daily Claude · Business Laws',
+    paper: 'Paper 2',
+    kind: 'subjective',
+    source: 'data/daily-laws.html',
+    duration: 3 * 60 * 60,
+    description: 'Fresh Claude-generated full-format Business Laws papers with answer outlines stored for review.'
+  },
+  'daily-quantitative': {
+    title: 'Daily Claude · Quantitative Aptitude',
+    paper: 'Paper 3',
+    kind: 'mcq',
+    source: 'data/daily-quantitative.html',
+    duration: 2 * 60 * 60,
+    description: 'Fresh 100-question Quantitative Aptitude papers with generated answer keys and explanations.'
+  },
+  'daily-economics': {
+    title: 'Daily Claude · Business Economics',
+    paper: 'Paper 4',
+    kind: 'mcq',
+    source: 'data/daily-economics.html',
+    duration: 2 * 60 * 60,
+    description: 'Fresh 100-question Business Economics papers with generated answer keys and explanations.'
   }
 };
 
@@ -827,7 +859,10 @@ async function loadArtifact(subject) {
             number,
             text: questionElement.querySelector('.qtext')?.textContent.trim() || `Question ${questionIndex + 1}`,
             options: [...questionElement.querySelectorAll('.opts > li')].map(option => option.textContent.trim()),
-            section
+            section,
+            reasoning: questionElement.querySelector('.reasoning')?.textContent.trim() || '',
+            sourceType: questionElement.querySelector('.source-type')?.textContent.trim() || undefined,
+            sourceLabel: questionElement.querySelector('.source-label')?.textContent.trim() || undefined
           });
         });
       });
@@ -862,6 +897,18 @@ function currentTest() {
     return { ...getOfficialTest('quantitative'), questions: state.data.questions };
   }
   if (getOfficialTest(state.subject)) return getOfficialTest(state.subject);
+  if (ARTIFACTS[state.subject]?.kind === 'mcq' && state.data) {
+    const paper = state.data.papers[state.paper - 1];
+    return {
+      id: `${state.subject}-${state.paper}`,
+      title: `${state.data.title} · Mock ${state.paper}`,
+      shortTitle: state.data.title,
+      paper: state.data.paper,
+      duration: state.data.duration,
+      negative: .25,
+      questions: paper?.questions || []
+    };
+  }
   if (state.subject === 'economics' && state.data) {
     const paper = state.data.papers[state.paper - 1];
     return {
@@ -1866,6 +1913,18 @@ function renderHome() {
       </div>
     </section>
 
+    <section class="section daily-papers-section">
+      <div class="page-shell">
+        <div class="section-heading"><div><p class="eyebrow">Updated every night</p><h2>Daily Claude papers.</h2><p>Five fresh full-format Foundation papers are generated, checked, and published automatically at 11 PM IST.</p></div><span class="level-pill">One API · answer keys included</span></div>
+        <div class="sprint-row">
+          <article class="sprint-card"><div><h3>Accounting · Paper 1</h3><p>Six 20-mark descriptive questions with compulsory Q1 and answer outlines stored with the batch.</p><button class="button small" data-action="pick" data-subject="daily-accounting">Open daily papers</button></div><span class="sprint-badge"><span><b>180</b> min</span></span></article>
+          <article class="sprint-card"><div><h3>Business Laws · Paper 2</h3><p>Six case-led descriptive questions in the current Foundation format, with marking logic.</p><button class="button small" data-action="pick" data-subject="daily-laws">Open daily papers</button></div><span class="sprint-badge"><span><b>180</b> min</span></span></article>
+          <article class="sprint-card"><div><h3>Quantitative Aptitude · Paper 3</h3><p>100 MCQs, −0.25 marking, generated answer key, and question-wise explanations.</p><button class="button small" data-action="pick" data-subject="daily-quantitative">Open daily papers</button></div><span class="sprint-badge"><span><b>120</b> min</span></span></article>
+          <article class="sprint-card"><div><h3>Business Economics · Paper 4</h3><p>100 MCQs covering the syllabus with a checked answer and reasoning for every item.</p><button class="button small" data-action="pick" data-subject="daily-economics">Open daily papers</button></div><span class="sprint-badge"><span><b>120</b> min</span></span></article>
+        </div>
+      </div>
+    </section>
+
     <section class="section frenzy-promo-section">
       <div class="page-shell">
         <a class="frenzy-promo" href="#frenzy">
@@ -2195,7 +2254,9 @@ async function startMcq(subject, paper = 1, options = {}) {
       ? await loadArtifact('economics')
       : subject === 'quantitative'
         ? { questions: await loadQuantitativeQuestions() }
-        : null;
+        : ARTIFACTS[subject]?.kind === 'mcq'
+          ? await loadArtifact(subject)
+          : null;
     const test = currentTest();
     state.session = readSession(subject, state.paper);
     if (!state.session || (!state.review && state.session.completedAt)) {
@@ -2317,7 +2378,9 @@ function renderMcqResults(subject, paper) {
       ? await loadArtifact('economics')
       : subject === 'quantitative'
         ? { questions: await loadQuantitativeQuestions() }
-        : null;
+        : ARTIFACTS[subject]?.kind === 'mcq'
+          ? await loadArtifact(subject)
+          : null;
     state.session = readSession(subject, state.paper);
     const test = currentTest();
     if (!state.session || !test) return renderError(new Error('No completed attempt was found for this paper.'));
@@ -2687,8 +2750,8 @@ async function route() {
   if (page === 'custom' && parts[1]) return startCustomTest(parts[1]);
   if (page === 'custom-results' && parts[1]) return renderCustomResults(parts[1]);
   if (page === 'pick' && ARTIFACTS[parts[1]]) return renderPicker(parts[1]);
-  if (page === 'exam' && (parts[1] === 'economics' || getOfficialTest(parts[1]))) return startMcq(parts[1], Number(parts[2]) || 1);
-  if (page === 'results' && (parts[1] === 'economics' || getOfficialTest(parts[1]))) return renderMcqResults(parts[1], Number(parts[2]) || 1);
+  if (page === 'exam' && (parts[1] === 'economics' || getOfficialTest(parts[1]) || ARTIFACTS[parts[1]]?.kind === 'mcq')) return startMcq(parts[1], Number(parts[2]) || 1);
+  if (page === 'results' && (parts[1] === 'economics' || getOfficialTest(parts[1]) || ARTIFACTS[parts[1]]?.kind === 'mcq')) return renderMcqResults(parts[1], Number(parts[2]) || 1);
   if (page === 'subjective' && ARTIFACTS[parts[1]]?.kind === 'subjective') return startSubjective(parts[1], Number(parts[2]) || 1);
   if (page === 'submitted' && ARTIFACTS[parts[1]]?.kind === 'subjective') return renderSubjectiveResult(parts[1], Number(parts[2]) || 1);
   renderHome();
