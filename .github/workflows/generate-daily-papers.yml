@@ -2,6 +2,15 @@ name: Generate daily CA Foundation papers
 
 on:
   workflow_dispatch:
+    inputs:
+      model:
+        description: Claude model for this manual batch
+        required: false
+        default: claude-sonnet-5
+        type: choice
+        options:
+          - claude-sonnet-5
+          - claude-opus-5
 
 permissions:
   contents: write
@@ -26,7 +35,7 @@ jobs:
       - name: Generate and validate five full papers
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: claude-sonnet-5
+          ANTHROPIC_MODEL: ${{ inputs.model || 'claude-sonnet-5' }}
           CA_SESSION: ${{ github.run_started_at }}
         run: node scripts/generate-daily-papers.mjs
 
